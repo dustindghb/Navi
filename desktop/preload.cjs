@@ -1,42 +1,67 @@
-import { contextBridge, ipcRenderer } from "electron"
+const { contextBridge, ipcRenderer } = require('electron')
 
-contextBridge.exposeInMainWorld("ollama", {
+contextBridge.exposeInMainWorld('ollama', {
   runChecks: async (modelName, allowAutoStart, host, port) => {
-    return await ipcRenderer.invoke("ollama:runChecks", { modelName, allowAutoStart, host, port })
+    return await ipcRenderer.invoke('ollama:runChecks', { modelName, allowAutoStart, host, port })
   },
   promptStart: async () => {
-    return await ipcRenderer.invoke("ollama:promptStart")
+    return await ipcRenderer.invoke('ollama:promptStart')
   },
   getDefaults: async () => {
-    return await ipcRenderer.invoke("ollama:getDefaults")
+    return await ipcRenderer.invoke('ollama:getDefaults')
   },
   detect: async () => {
-    return await ipcRenderer.invoke("ollama:detect")
+    return await ipcRenderer.invoke('ollama:detect')
   },
   persona: {
     load: async () => {
-      return await ipcRenderer.invoke("persona:load")
+      return await ipcRenderer.invoke('persona:load')
     },
     save: async (persona) => {
-      return await ipcRenderer.invoke("persona:save", persona)
+      return await ipcRenderer.invoke('persona:save', persona)
     },
   },
   regulations: {
     fetch: async (filters) => {
-      return await ipcRenderer.invoke("regulations:fetch", filters)
+      return await ipcRenderer.invoke('regulations:fetch', filters)
     },
     analyze: async (regulationId, persona) => {
-      return await ipcRenderer.invoke("regulations:analyze", regulationId, persona)
+      return await ipcRenderer.invoke('regulations:analyze', regulationId, persona)
     },
   },
   comments: {
     save: async (comment) => {
-      return await ipcRenderer.invoke("comments:save", comment)
+      return await ipcRenderer.invoke('comments:save', comment)
     },
     list: async () => {
-      return await ipcRenderer.invoke("comments:list")
+      return await ipcRenderer.invoke('comments:list')
     },
   },
+  api: {
+    fetchJSON: async (url) => {
+      return await ipcRenderer.invoke('api:fetchJSON', { url })
+    }
+  },
+  apiData: {
+    getLatest: async () => {
+      return await ipcRenderer.invoke('apiData:getLatest')
+    },
+    getStatus: async () => {
+      return await ipcRenderer.invoke('apiData:getStatus')
+    },
+    clear: async () => {
+      return await ipcRenderer.invoke('apiData:clear')
+    },
+    subscribe: (callback) => {
+      const listener = (_event, payload) => {
+        try { callback(payload) } catch {}
+      }
+      ipcRenderer.on('apiData:update', listener)
+      return () => {
+        try { ipcRenderer.removeListener('apiData:update', listener) } catch {}
+      }
+    }
+  }
 })
 
 

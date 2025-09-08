@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { request } from 'undici';
 import { spawn, exec } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -36,11 +37,33 @@ function createWindow() {
     },
   });
 
-  win.loadFile(path.join(app.getAppPath(), 'renderer.html'));
+  const devUrl = process.env.RENDERER_DEV_URL;
+  if (devUrl) {
+    win.loadURL(devUrl).catch(() => {
+      // Fallback to built file if dev server not available
+      const built = path.join(app.getAppPath(), 'renderer', 'dist', 'index.html');
+      if (fs.existsSync(built)) {
+        win.loadFile(built);
+      } else {
+        win.loadFile(path.join(app.getAppPath(), 'renderer.html'));
+      }
+    });
+  } else {
+    const built = path.join(app.getAppPath(), 'renderer', 'dist', 'index.html');
+    if (fs.existsSync(built)) {
+      win.loadFile(built);
+    } else {
+      win.loadFile(path.join(app.getAppPath(), 'renderer.html'));
+    }
+  }
 }
 
 app.whenReady().then(() => {
   createWindow();
+  // Start automatic API data fetching and persistence
+  try {
+    startApiDataAutoFetch();
+  } catch {}
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -396,4 +419,134 @@ ipcMain.handle('persona:save', async (_event, persona) => {
   }
 });
 
+// --------------------- Public API fetch ---------------------
+
+ipcMain.handle('api:fetchJSON', async (_event, args) => {
+  const { url } = args || {};
+  if (!url || typeof url !== 'string') {
+    return { ok: false, error: 'Missing URL' };
+  }
+  try {
+    const { statusCode, body } = await request(url, { method: 'GET' });
+    const text = await body.text();
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch {}
+    const ok = statusCode >= 200 && statusCode < 300;
+    return { ok, status: statusCode, data: parsed, raw: parsed ? undefined : text };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+
+// --------------------- API Data auto-fetch & persistence ---------------------
+
+const API_DATA_DEFAULT_URL = 'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/data?all=true';
+const API_DATA_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+let apiDataInterval = null;
+let apiDataIntervalMs = API_DATA_INTERVAL_MS;
+let apiDataUrl = API_DATA_DEFAULT_URL;
+let lastApiDataPayload = null;
+
+function getApiDataPath() {
+  const dir = app.getPath('userData');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return path.join(dir, 'api-data.json');
+}
+
+function readApiDataFromDisk() {
+  try {
+    const file = getApiDataPath();
+    if (!fs.existsSync(file)) return null;
+    const raw = fs.readFileSync(file, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function broadcastApiDataUpdate(payload) {
+  try {
+    for (const bw of BrowserWindow.getAllWindows()) {
+      try { bw.webContents.send('apiData:update', payload); } catch {}
+    }
+  } catch {}
+}
+
+async function fetchAndPersistApiData(url) {
+  const startedAt = new Date().toISOString();
+  try {
+    const { statusCode, body } = await request(url, { method: 'GET' });
+    const text = await body.text();
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch {}
+    const ok = statusCode >= 200 && statusCode < 300;
+    const payload = {
+      url,
+      fetchedAt: startedAt,
+      ok,
+      status: statusCode,
+      data: parsed || undefined,
+      raw: parsed ? undefined : text,
+    };
+    try { fs.writeFileSync(getApiDataPath(), JSON.stringify(payload, null, 2), 'utf8'); } catch {}
+    lastApiDataPayload = payload;
+    broadcastApiDataUpdate(payload);
+    return payload;
+  } catch (e) {
+    const payload = {
+      url,
+      fetchedAt: startedAt,
+      ok: false,
+      error: String(e),
+    };
+    try { fs.writeFileSync(getApiDataPath(), JSON.stringify(payload, null, 2), 'utf8'); } catch {}
+    lastApiDataPayload = payload;
+    broadcastApiDataUpdate(payload);
+    return payload;
+  }
+}
+
+function startApiDataAutoFetch(url = API_DATA_DEFAULT_URL, intervalMs = API_DATA_INTERVAL_MS) {
+  apiDataUrl = url;
+  apiDataIntervalMs = intervalMs;
+  if (apiDataInterval) {
+    try { clearInterval(apiDataInterval); } catch {}
+    apiDataInterval = null;
+  }
+  // Load any previously saved payload
+  try { lastApiDataPayload = readApiDataFromDisk(); } catch {}
+  // Do an immediate fetch, then schedule
+  fetchAndPersistApiData(apiDataUrl).catch(() => {});
+  try {
+    apiDataInterval = setInterval(() => {
+      fetchAndPersistApiData(apiDataUrl).catch(() => {});
+    }, apiDataIntervalMs);
+  } catch {}
+}
+
+ipcMain.handle('apiData:getLatest', async () => {
+  if (!lastApiDataPayload) {
+    try { lastApiDataPayload = readApiDataFromDisk(); } catch {}
+  }
+  return lastApiDataPayload || null;
+});
+
+ipcMain.handle('apiData:getStatus', async () => {
+  return {
+    url: apiDataUrl,
+    intervalMs: apiDataIntervalMs,
+    running: !!apiDataInterval,
+    hasData: !!lastApiDataPayload,
+    fetchedAt: lastApiDataPayload?.fetchedAt || null,
+  };
+});
+
+ipcMain.handle('apiData:clear', async () => {
+  try { fs.unlinkSync(getApiDataPath()); } catch {}
+  lastApiDataPayload = null;
+  broadcastApiDataUpdate(null);
+  return { ok: true };
+});
 
