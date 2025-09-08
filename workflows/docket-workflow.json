@@ -1,0 +1,391 @@
+{
+  "name": "Navi",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://api.regulations.gov/v4/documents",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filter[withinCommentPeriod]",
+              "value": "true"
+            },
+            {
+              "name": "filter[documentType]",
+              "value": "Proposed Rule, Notice"
+            },
+            {
+              "name": "page[number]",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -160,
+        -80
+      ],
+      "id": "38b873c6-2f88-4525-8c7b-ec403fdb78a4",
+      "name": "fetch docs"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the input data - handle both parsed JSON and string responses\nlet response;\nconst inputData = $input.all()[0].json;\n\n// Check if the data is a string that needs parsing\nif (typeof inputData.data === 'string') {\n  try {\n    response = JSON.parse(inputData.data);\n  } catch (e) {\n    console.log('Failed to parse JSON string:', e);\n    return [{ json: { error: 'Failed to parse response data', rawData: inputData } }];\n  }\n} else {\n  response = inputData;\n}\n\n// Validate response structure\nif (!response || !response.data || !Array.isArray(response.data)) {\n  console.log('Invalid response structure:', response);\n  return [{ json: { error: 'Invalid API response structure', response: response } }];\n}\n\nconst documents = response.data;\nconst openDockets = [];\n\nconsole.log(`Processing ${documents.length} documents`);\n\nfor (const doc of documents) {\n  // Safety checks for document structure\n  if (!doc || !doc.attributes) {\n    console.log('Skipping document with no attributes:', doc?.id);\n    continue;\n  }\n  \n  const attrs = doc.attributes;\n  \n  // Only process documents that are explicitly open for comments\n  if (attrs.openForComment !== true || attrs.withinCommentPeriod !== true) {\n    console.log(`Skipping closed document: ${doc.id}`);\n    continue;\n  }\n  \n  console.log(`Processing open document: ${doc.id} - ${attrs.title}`);\n  \n  // Build the result object with safe property access\n  const docketInfo = {\n    docketId: attrs.docketId,\n    documentId: doc.id,\n    title: attrs.title,\n    agencyId: attrs.agencyId,\n    documentType: attrs.documentType,\n    openForComment: attrs.openForComment,\n    withinCommentPeriod: attrs.withinCommentPeriod,\n    commentEndDate: attrs.commentEndDate,\n    commentStartDate: attrs.commentStartDate,\n    postedDate: attrs.postedDate,\n    subtype: attrs.subtype,\n    frDocNum: attrs.frDocNum,\n    allowLateComments: attrs.allowLateComments,\n    objectId: attrs.objectId,\n    lastModifiedDate: attrs.lastModifiedDate,\n    withdrawn: attrs.withdrawn,\n    highlightedContent: attrs.highlightedContent,\n    \n    // API Links\n    apiDocumentLink: doc.links?.self,\n    apiDocketLink: `https://api.regulations.gov/v4/dockets/${attrs.docketId}`,\n    \n    // Public Regulations.gov Web Links (clickable in browser)\n    webDocumentLink: `https://www.regulations.gov/document/${doc.id}`,\n    webDocketLink: `https://www.regulations.gov/docket/${attrs.docketId}`,\n    webCommentLink: `https://www.regulations.gov/comment/${doc.id}`,\n    \n    // Federal Register Link (if available)\n    federalRegisterLink: attrs.frDocNum ? `https://www.federalregister.gov/documents/${new Date(attrs.postedDate).getFullYear()}/${String(new Date(attrs.postedDate).getMonth() + 1).padStart(2, '0')}/${String(new Date(attrs.postedDate).getDate()).padStart(2, '0')}/${attrs.frDocNum}` : null\n  };\n  \n  openDockets.push(docketInfo);\n}\n\n// Remove duplicates by docketId - keep the most recent document per docket\nconst uniqueDockets = [];\nconst docketMap = new Map();\n\nfor (const docket of openDockets) {\n  const existingDocket = docketMap.get(docket.docketId);\n  \n  if (!existingDocket) {\n    docketMap.set(docket.docketId, docket);\n  } else {\n    // Keep the more recently posted document\n    const currentDate = new Date(docket.postedDate);\n    const existingDate = new Date(existingDocket.postedDate);\n    \n    if (currentDate > existingDate) {\n      docketMap.set(docket.docketId, docket);\n    }\n  }\n}\n\n// Convert Map back to array\nfor (const [docketId, docket] of docketMap) {\n  uniqueDockets.push(docket);\n}\n\nconsole.log(`Found ${uniqueDockets.length} unique open dockets`);\n\nreturn uniqueDockets.map(docket => ({ json: docket }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        -80
+      ],
+      "id": "1d1a9e19-8977-444d-b713-de643ffd3ec0",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process all input items\nconst results = [];\n\nfor (const item of $input.all()) {\n  const webDocumentLink = item.json.webDocumentLink;\n  const documentId = webDocumentLink.split('/document/')[1];\n  \n  // Try HTML first, but could fall back to PDF\n  const contentUrl = `https://downloads.regulations.gov/${documentId}/content.html`;\n  const pdfUrl = `https://downloads.regulations.gov/${documentId}/content.pdf`;\n  \n  results.push({\n    json: {\n      ...item.json,\n      contentUrl: contentUrl,\n      pdfUrl: pdfUrl,\n      documentId: documentId\n    }\n  });\n}\n\nreturn results;"
+      },
+      "name": "Extract Document ID",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        256,
+        -80
+      ],
+      "id": "1bf61746-a93f-43dc-b708-46a43dfaa08a",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.pdfUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "21Jl3YnRse9ef0CpNF979NvKHZbioX1RAP46Tv8c"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "name": "HTTP Request - Get Content File",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        768,
+        -80
+      ],
+      "id": "66209c61-3fc3-47b6-ab5f-d5e9e77c93b0",
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -368,
+        -80
+      ],
+      "id": "e72c574a-1845-4d5f-9a79-8e872965806b",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        528,
+        -80
+      ],
+      "id": "5db5fafc-a5a9-4c19-84b9-aa32d1793288",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        848,
+        -256
+      ],
+      "id": "e91ffaa1-65ae-42cd-9fcc-b663521f7574",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Keep only \"text\" and remove newline chars (\\n, \\r\\n) by replacing with a space\nreturn items.map(item => {\n  const text = item.json?.text;\n  const cleaned = typeof text === 'string' ? text.replace(/\\r?\\n/g, ' ') : null;\n  return { json: { text: cleaned } };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        -256
+      ],
+      "id": "afb4e1e5-0b82-4476-b859-ce665d18f4ed",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1248,
+        -48
+      ],
+      "id": "03e2dfcf-eb57-4f5c-b8af-ac3f50803409",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "bucketName": "navi-dockets",
+        "fileName": "={{ $json.documentId }}.json",
+        "binaryData": false,
+        "fileContent": "={{ JSON.stringify($json) }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        -48
+      ],
+      "id": "cfa02c80-89dd-485f-a8d9-d79406eab4a7",
+      "name": "Upload a file",
+      "credentials": {
+        "aws": {
+          "id": "QLNCYvjUzugQvoK1",
+          "name": "AWS account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "bucketName": "navi-dockets",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        224
+      ],
+      "id": "60f48bdf-c32f-4268-9566-49593cd477d2",
+      "name": "Get many files",
+      "credentials": {
+        "aws": {
+          "id": "QLNCYvjUzugQvoK1",
+          "name": "AWS account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "bucketName": "navi-dockets",
+        "fileKey": "={{ $json.Key }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 2,
+      "position": [
+        -304,
+        224
+      ],
+      "id": "7465a12e-60f5-4f06-a7cf-218f9100e4c3",
+      "name": "Delete a file",
+      "credentials": {
+        "aws": {
+          "id": "QLNCYvjUzugQvoK1",
+          "name": "AWS account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input: items like { json: { Key: \"CDC-2025-0058-0001.json\", ... } }\n// Output: items like { json: { Key: \"CDC-2025-0058-0001.json\" } }\nreturn $input.all().map(i => ({\n  json: { Key: i.json.Key }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -496,
+        224
+      ],
+      "id": "109323cf-0ac6-4053-a8f4-9963f0e11937",
+      "name": "Code2"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "fetch docs": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Extract Document ID",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Document ID": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Get Content File": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "fetch docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request - Get Content File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Upload a file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload a file": {
+      "main": [
+        []
+      ]
+    },
+    "Get many files": {
+      "main": [
+        [
+          {
+            "node": "Code2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code2": {
+      "main": [
+        [
+          {
+            "node": "Delete a file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete a file": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "3512f473-aecc-4f82-b6b8-7b1da006542c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "57da923809da51439b894e9cbb8487d25e9b17747b55bb53f40119dfffcdc195"
+  },
+  "id": "iVjsJHCygS6NnV1W",
+  "tags": []
+}
