@@ -3,35 +3,647 @@
   <head>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'">
-    <title>Navi Desktop - Ollama Check</title>
+    <title>Navi - Civic Engagement Assistant</title>
     <style>
-      body { font-family: -apple-system, system-ui, sans-serif; margin: 20px; }
-      .row { margin-bottom: 12px; }
-      .ok { color: #0a7f3f; }
-      .warn { color: #a15b00; }
-      .err { color: #a11; }
-      code { background: #f4f4f4; padding: 2px 4px; border-radius: 4px; }
-      pre { background: #f8f8f8; padding: 12px; border-radius: 6px; overflow: auto; }
+      :root {
+        --primary-bg: #0A0A0A;
+        --secondary-bg: #1A1A1A;
+        --tertiary-bg: #2A2A2A;
+        --accent-color: #3C362A;
+        --accent-hover: #4A4237;
+        --text-primary: #FAFAFA;
+        --text-secondary: #B8B8B8;
+        --text-muted: #888888;
+        --border-color: #333333;
+        --success-color: #4A7C59;
+        --warning-color: #B8860B;
+        --error-color: #B85450;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        background: var(--primary-bg);
+        color: var(--text-primary);
+        line-height: 1.6;
+        overflow-x: hidden;
+      }
+
+      .app-container {
+        display: flex;
+        height: 100vh;
+      }
+
+      .sidebar {
+        width: 280px;
+        background: var(--secondary-bg);
+        border-right: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+      }
+
+      .sidebar-header {
+        padding: 20px;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .logo {
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 8px;
+      }
+
+      .tagline {
+        font-size: 14px;
+        color: var(--text-muted);
+      }
+
+      .nav-menu {
+        flex: 1;
+        padding: 20px 0;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        padding: 12px 20px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        border: none;
+        background: none;
+        color: var(--text-secondary);
+        width: 100%;
+        text-align: left;
+        font-size: 14px;
+      }
+
+      .nav-item:hover {
+        background: var(--tertiary-bg);
+        color: var(--text-primary);
+      }
+
+      .nav-item.active {
+        background: var(--accent-color);
+        color: var(--text-primary);
+      }
+
+      .nav-icon {
+        width: 20px;
+        height: 20px;
+        margin-right: 12px;
+        opacity: 0.7;
+      }
+
+      .main-content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .header {
+        padding: 20px 30px;
+        border-bottom: 1px solid var(--border-color);
+        background: var(--secondary-bg);
+      }
+
+      .header h1 {
+        font-size: 28px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+
+      .header p {
+        color: var(--text-secondary);
+        font-size: 16px;
+      }
+
+      .content-area {
+        flex: 1;
+        padding: 30px;
+        overflow-y: auto;
+      }
+
+      .section {
+        background: var(--secondary-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 24px;
+      }
+
+      .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 20px;
+      }
+
+      .section-title {
+        font-size: 20px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .section-subtitle {
+        color: var(--text-secondary);
+        font-size: 14px;
+        margin-top: 4px;
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+
+      .form-label {
+        display: block;
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 8px;
+      }
+
+      .form-input, .form-select, .form-textarea {
+        width: 100%;
+        padding: 12px 16px;
+        background: var(--tertiary-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        color: var(--text-primary);
+        font-size: 14px;
+        transition: all 0.2s ease;
+      }
+
+      .form-input:focus, .form-select:focus, .form-textarea:focus {
+        outline: none;
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 3px rgba(60, 54, 42, 0.1);
+      }
+
+      .form-textarea {
+        resize: vertical;
+        min-height: 100px;
+      }
+
+      .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+
+      .btn {
+        padding: 12px 20px;
+        border: none;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .btn-primary {
+        background: var(--accent-color);
+        color: var(--text-primary);
+      }
+
+      .btn-primary:hover {
+        background: var(--accent-hover);
+      }
+
+      .btn-secondary {
+        background: var(--tertiary-bg);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-color);
+      }
+
+      .btn-secondary:hover {
+        background: var(--border-color);
+        color: var(--text-primary);
+      }
+
+      .status-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .status-success {
+        background: rgba(74, 124, 89, 0.2);
+        color: var(--success-color);
+      }
+
+      .status-warning {
+        background: rgba(184, 134, 11, 0.2);
+        color: var(--warning-color);
+      }
+
+      .status-error {
+        background: rgba(184, 84, 80, 0.2);
+        color: var(--error-color);
+      }
+
+      .regulation-card {
+        background: var(--tertiary-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 16px;
+        transition: all 0.2s ease;
+      }
+
+      .regulation-card:hover {
+        border-color: var(--accent-color);
+      }
+
+      .regulation-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 12px;
+      }
+
+      .regulation-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 4px;
+      }
+
+      .regulation-agency {
+        font-size: 14px;
+        color: var(--text-secondary);
+      }
+
+      .regulation-meta {
+        display: flex;
+        gap: 16px;
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-bottom: 12px;
+      }
+
+      .regulation-summary {
+        font-size: 14px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+        margin-bottom: 16px;
+      }
+
+      .regulation-actions {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .relevance-score {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 8px;
+        background: var(--accent-color);
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .filter-bar {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        margin-bottom: 24px;
+        padding: 16px;
+        background: var(--secondary-bg);
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+      }
+
+      .search-input {
+        flex: 1;
+        padding: 10px 16px;
+        background: var(--tertiary-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        color: var(--text-primary);
+        font-size: 14px;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 40px;
+        color: var(--text-secondary);
+      }
+
+      .spinner {
+        width: 20px;
+        height: 20px;
+        border: 2px solid var(--border-color);
+        border-top: 2px solid var(--accent-color);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-right: 12px;
+      }
+
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+
+      .persona-summary {
+        background: var(--tertiary-bg);
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 20px;
+      }
+
+      .persona-summary h4 {
+        color: var(--text-primary);
+        margin-bottom: 8px;
+      }
+
+      .persona-summary p {
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+
+      .stat-card {
+        background: var(--tertiary-bg);
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+      }
+
+      .stat-number {
+        font-size: 32px;
+        font-weight: 700;
+        color: var(--accent-color);
+        margin-bottom: 4px;
+      }
+
+      .stat-label {
+        font-size: 14px;
+        color: var(--text-secondary);
+      }
     </style>
   </head>
   <body>
-    <h2>Environment Check: Ollama</h2>
+    <div class="app-container">
+      <div class="sidebar">
+        <div class="sidebar-header">
+          <div class="logo">Navi</div>
+          <div class="tagline">Civic Engagement Assistant</div>
+        </div>
+        <nav class="nav-menu">
+          <button class="nav-item active" data-view="dashboard">
+            <span class="nav-icon"></span>
+            Dashboard
+          </button>
+          <button class="nav-item" data-view="persona">
+            <span class="nav-icon"></span>
+            My Persona
+          </button>
+          <button class="nav-item" data-view="settings">
+            <span class="nav-icon"></span>
+            Settings
+          </button>
+        </nav>
+      </div>
 
-    <div class="row">
-      <label>Model name:</label>
-      <input id="model" value="gpt-oss:20b" style="width: 240px" />
-      <label style="margin-left: 12px;">Host:</label>
-      <input id="host" value="127.0.0.1" style="width: 130px" />
-      <label style="margin-left: 6px;">Port:</label>
-      <input id="port" value="11434" style="width: 90px" />
-      <label style="margin-left: 12px;"><input id="autoStart" type="checkbox" checked /> Allow auto-start</label>
-      <button id="detect">Detect</button>
-      <button id="run">Run Checks</button>
+      <div class="main-content">
+        <!-- Dashboard View -->
+        <div id="dashboard-view" class="view">
+          <div class="header">
+            <h1>Dashboard</h1>
+            <p>Your civic engagement overview</p>
+          </div>
+          <div class="content-area">
+            
+
+            <div class="section">
+              <div class="section-header">
+                <div>
+                  <h3 class="section-title">High Priority Regulations</h3>
+                  <p class="section-subtitle">Regulations that strongly match your interests and have upcoming deadlines</p>
+                </div>
+              </div>
+              <div id="priority-regulations"></div>
+            </div>
+
+            <div class="section">
+              <div class="section-header">
+                <div>
+                  <h3 class="section-title">Recent Activity</h3>
+                  <p class="section-subtitle">Your latest civic engagement actions</p>
+                </div>
+              </div>
+              <div id="recent-activity"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Persona View -->
+        <div id="persona-view" class="view hidden">
+          <div class="header">
+            <h1>My Persona</h1>
+            <p>Configure your civic profile for personalized regulation matching</p>
+          </div>
+          <div class="content-area">
+            <div class="section">
+              <div class="section-header">
+                <div>
+                  <h3 class="section-title">Personal Information</h3>
+                  <p class="section-subtitle">Help us understand your civic context</p>
+                </div>
+                <div class="status-indicator status-success hidden" id="persona-status">Saved</div>
+              </div>
+              
+              <div class="form-group">
+                <label class="form-label">Display Name (Optional)</label>
+                <input type="text" class="form-input" id="p_name" placeholder="How you'd like to be addressed">
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label">Location</label>
+                  <input type="text" class="form-input" id="p_region" placeholder="ZIP code, city, or state (e.g., 94107, CA)">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Primary Role</label>
+                  <select class="form-select" id="p_role">
+                    <option value="Citizen">Individual Citizen</option>
+                    <option value="Small Business">Small Business Owner</option>
+                    <option value="NGO">Non-Profit/NGO Representative</option>
+                    <option value="Researcher">Academic/Researcher</option>
+                    <option value="Industry">Industry Professional</option>
+                    <option value="Legal">Legal Professional</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Areas of Interest</label>
+                <textarea class="form-textarea" id="p_interests" placeholder="Describe your civic interests, policy areas you care about, or issues that affect you. Examples: environmental protection, small business regulations, healthcare policy, technology privacy, transportation, education funding..."></textarea>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label">Analysis Depth</label>
+                  <select class="form-select" id="p_depth">
+                    <option value="summary">Summary - Quick overviews</option>
+                    <option value="detailed">Detailed - In-depth analysis</option>
+                    <option value="expert">Expert - Technical details</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Notification Frequency</label>
+                  <select class="form-select" id="p_notifications">
+                    <option value="daily">Daily digest</option>
+                    <option value="weekly">Weekly summary</option>
+                    <option value="urgent">Urgent only</option>
+                    <option value="none">No notifications</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <button class="btn btn-primary" id="savePersona">Save Persona</button>
+                <button class="btn btn-secondary" id="testPersona">Test Matching</button>
+              </div>
+            </div>
+
+            <div class="section" id="persona-preview" style="display: none;">
+              <div class="section-header">
+                <h3 class="section-title">Persona Preview</h3>
+                <p class="section-subtitle">How Navi sees your civic profile</p>
+              </div>
+              <div class="persona-summary" id="persona-summary-content">
+                <!-- Populated by JavaScript -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        
+
+        <!-- Settings View -->
+        <div id="settings-view" class="view hidden">
+          <div class="header">
+            <h1>Settings</h1>
+            <p>Configure Navi and manage your privacy preferences</p>
+          </div>
+          <div class="content-area">
+            <div class="section">
+              <div class="section-header">
+                <h3 class="section-title">AI Model Configuration</h3>
+                <p class="section-subtitle">Configure your local AI model for regulation analysis</p>
+              </div>
+              
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label">Model Name</label>
+                  <input type="text" class="form-input" id="model" value="gpt-oss:20b">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Host</label>
+                  <input type="text" class="form-input" id="host" value="127.0.0.1">
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label">Port</label>
+                  <input type="text" class="form-input" id="port" value="11434">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Auto-start Server</label>
+                  <select class="form-select" id="autoStart">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <button class="btn btn-secondary" id="detect">Auto-detect Settings</button>
+                <button class="btn btn-primary" id="run">Test Connection</button>
+              </div>
+
+              <div id="results"></div>
+            </div>
+
+            <div class="section">
+              <div class="section-header">
+                <h3 class="section-title">Privacy & Data</h3>
+                <p class="section-subtitle">Your data stays local and private</p>
+              </div>
+              
+              <div class="form-group">
+                <label class="form-label">
+                  <input type="checkbox" id="analytics-opt-out" style="margin-right: 8px;">
+                  Opt out of anonymous usage analytics
+                </label>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">
+                  <input type="checkbox" id="cache-regulations" checked style="margin-right: 8px;">
+                  Cache regulation data locally for faster access
+                </label>
+              </div>
+
+              <div class="form-group">
+                <button class="btn btn-secondary" id="clear-cache">Clear Local Cache</button>
+                <button class="btn btn-secondary" id="export-data">Export My Data</button>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-header">
+                <h3 class="section-title">About Navi</h3>
+              </div>
+              <p style="color: var(--text-secondary); line-height: 1.6;">
+                Navi helps increase civic engagement by matching proposed regulations from regulations.gov 
+                to your personal interests and circumstances. All analysis happens locally on your device 
+                using open-source AI models, ensuring your privacy and data security.
+              </p>
+              <div style="margin-top: 16px;">
+                <span style="color: var(--text-muted); font-size: 14px;">Version 1.0.0</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div id="results"></div>
     <script src="renderer.js" defer></script>
   </body>
-  </html>
+</html>
+
+
 
 

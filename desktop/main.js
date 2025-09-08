@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import { spawn, exec } from 'node:child_process';
 import path from 'node:path';
+import fs from 'node:fs';
 
 const DEFAULT_OLLAMA_HOST = '127.0.0.1';
 const DEFAULT_OLLAMA_PORT = 11434;
@@ -361,6 +362,38 @@ ipcMain.handle('ollama:promptStart', async () => {
     return { started: ready };
   }
   return { started: false };
+});
+
+// --------------------- Persona persistence ---------------------
+
+function getPersonaPath() {
+  const dir = app.getPath('userData');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {}
+  return path.join(dir, 'persona.json');
+}
+
+ipcMain.handle('persona:load', async () => {
+  try {
+    const file = getPersonaPath();
+    if (!fs.existsSync(file)) return { exists: false, persona: null };
+    const raw = fs.readFileSync(file, 'utf8');
+    const persona = JSON.parse(raw);
+    return { exists: true, persona };
+  } catch (e) {
+    return { exists: false, error: String(e) };
+  }
+});
+
+ipcMain.handle('persona:save', async (_event, persona) => {
+  try {
+    const file = getPersonaPath();
+    fs.writeFileSync(file, JSON.stringify(persona || {}, null, 2), 'utf8');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
 });
 
 
