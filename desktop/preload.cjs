@@ -52,9 +52,6 @@ contextBridge.exposeInMainWorld('ollama', {
     clear: async () => {
       return await ipcRenderer.invoke('apiData:clear')
     },
-    fetchNow: async (url) => {
-      return await ipcRenderer.invoke('apiData:fetchNow', { url })
-    },
     subscribe: (callback) => {
       const listener = (_event, payload) => {
         try { callback(payload) } catch {}

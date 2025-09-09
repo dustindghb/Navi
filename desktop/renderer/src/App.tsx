@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Box, TextField, Button } from '@mui/material';
 import { Dashboard } from './pages/Dashboard';
 import { Persona } from './pages/Persona';
 import { Settings } from './pages/Settings';
@@ -10,14 +9,14 @@ function Chat() {
   const [response, setResponse] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   return (
-    <Box sx={{ p: 2 }}>
-      <Box sx={{ mb: 2 }}>
-        <TextField fullWidth label="Model" value={model} onChange={(e) => setModel(e.target.value)} />
-      </Box>
-      <Box sx={{ mb: 2 }}>
-        <TextField fullWidth multiline minRows={5} label="Prompt" value={input} onChange={(e) => setInput(e.target.value)} />
-      </Box>
-      <Button onClick={async () => {
+    <div style={{ padding: 20 }}>
+      <div style={{ marginBottom: 10 }}>
+        <input style={{ width: '100%', padding: 8, background: '#111', color: '#fafafa', border: '1px solid #333' }} value={model} onChange={(e) => setModel(e.target.value)} />
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <textarea style={{ width: '100%', minHeight: 120, padding: 8, background: '#111', color: '#fafafa', border: '1px solid #333' }} value={input} onChange={(e) => setInput(e.target.value)} />
+      </div>
+      <button onClick={async () => {
         setLoading(true);
         setResponse('');
         try {
@@ -30,13 +29,13 @@ function Chat() {
           else setResponse(res?.error || 'Failed');
         } catch (e: any) { setResponse(String(e?.message || e)); }
         finally { setLoading(false); }
-      }} disabled={loading} variant="contained">
+      }} disabled={loading} style={{ padding: '8px 16px', background: '#3C362A', color: '#fafafa', border: 'none', cursor: 'pointer' }}>
         {loading ? 'Sending…' : 'Send'}
-      </Button>
-      <Box component="pre" sx={{ mt: 2, whiteSpace: 'pre-wrap', bgcolor: '#0f0f0f', p: 1.5, border: '1px solid #333', borderRadius: 1, overflowX: 'auto' }}>
+      </button>
+      <pre style={{ marginTop: 16, whiteSpace: 'pre-wrap', background: '#0f0f0f', padding: 12, border: '1px solid #333', borderRadius: 4 }}>
         {response || 'Response will appear here.'}
-      </Box>
-    </Box>
+      </pre>
+    </div>
   );
 }
 
@@ -46,8 +45,8 @@ export function App() {
   const [view, setView] = useState<ViewKey>('dashboard');
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: '#0A0A0A', color: '#FAFAFA' }}>
-      <aside style={{ width: 280, background: '#1A1A1A', borderRight: '1px solid #333', minHeight: 0, overflow: 'auto' }}>
+    <div style={{ display: 'flex', height: '100vh', background: '#0A0A0A', color: '#FAFAFA' }}>
+      <aside style={{ width: 280, background: '#1A1A1A', borderRight: '1px solid #333' }}>
         <div style={{ padding: 20, borderBottom: '1px solid #333' }}>
           <div style={{ fontSize: 24, fontWeight: 700 }}>Navi</div>
           <div style={{ fontSize: 14, color: '#B8B8B8' }}>Civic Engagement Assistant</div>
@@ -59,7 +58,7 @@ export function App() {
           <button onClick={() => setView('chat')} style={navStyle(view === 'chat')}>Chat</button>
         </nav>
       </aside>
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         {view === 'dashboard' && <Dashboard />}
         {view === 'persona' && <Persona />}
         {view === 'settings' && <Settings />}
