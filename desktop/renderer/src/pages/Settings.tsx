@@ -56,6 +56,7 @@ declare global {
         getLatest?: () => Promise<ApiDataPayload | null>;
         getStatus?: () => Promise<ApiDataStatus>;
         clear?: () => Promise<{ ok: boolean }>;
+        fetchNow?: (url?: string) => Promise<ApiDataPayload | null>;
         subscribe?: (cb: (payload: ApiDataPayload | null) => void) => () => void;
       };
       gen?: {
@@ -378,13 +379,31 @@ export function Settings() {
           <KV label="Last fetched" value={apiStatus?.fetchedAt || 'N/A'} />
           <StatusItem label="Has data" value={!!apiStatus?.hasData} />
           <Details title="Latest Payload" data={apiPayload} />
-          <Box sx={{ mt: 2 }}>
+          <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             <Button 
               variant="outlined" 
               color="secondary"
               onClick={async () => { try { await window.ollama?.apiData?.clear?.(); setApiPayload(null); setApiStatus((p) => ({ ...(p || {}), hasData: false, fetchedAt: null })); } catch {} }}
             >
               Clear stored data
+            </Button>
+            <Button 
+              variant="contained"
+              onClick={async () => {
+                try {
+                  const url = apiStatus?.url || 'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/data?all=true';
+                  const payload = await window.ollama?.apiData?.fetchNow?.(url);
+                  if (payload) {
+                    // @ts-ignore
+                    setApiPayload(payload);
+                    setApiStatus((p) => ({ ...(p || {}), fetchedAt: payload?.fetchedAt || null, hasData: !!payload }));
+                  }
+                } catch (e) {
+                  setError(String(e as any));
+                }
+              }}
+            >
+              Fetch & Store Now
             </Button>
           </Box>
         </Paper>

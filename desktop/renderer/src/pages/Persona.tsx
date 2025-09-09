@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Box, Paper, Typography, TextField, Button, Alert } from '@mui/material';
 
 type PersonaData = {
   name?: string;
@@ -53,48 +54,52 @@ export function Persona() {
   }
 
   return (
-    <div>
-      <header style={headerStyle}>
-        <h1 style={{ margin: 0 }}>My Persona</h1>
-        <p style={{ color: '#B8B8B8', margin: '6px 0 0' }}>Configure your civic profile</p>
-      </header>
-      <div style={{ padding: 30 }}>
-        <section style={sectionStyle}>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <div>
-              <h3 style={titleStyle}>Personal Information</h3>
-              <p style={subtitleStyle}>Help us understand your civic context</p>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 16 }}>
-            <label style={labelStyle}>Display Name (Optional)</label>
-            <input style={inputStyle} value={persona.name || ''} onChange={(e) => { setPersona({ ...persona, name: e.target.value }); setIsDirty(true); }} placeholder="How you'd like to be addressed" />
-          </div>
-
-          <div>
-            <label style={labelStyle}>Primary Role</label>
-            <input style={inputStyle} value={persona.role || ''} onChange={(e) => { setPersona({ ...persona, role: e.target.value }); setIsDirty(true); }} placeholder="e.g., Small Business Owner, Student, Advocate" />
-          </div>
-
-          <div>
-            <label style={labelStyle}>Areas of Interest</label>
-            <textarea style={{ ...inputStyle, minHeight: 100 }} value={interestsText} onChange={(e) => { setInterestsText(e.target.value); setIsDirty(true); }} placeholder="Environment, Small Business, Tech Policy..." />
-          </div>
-
-          {/* Analysis Depth removed */}
-
-          {errorText && (
-            <div style={{ color: '#FF6B6B', fontSize: 12, marginTop: 8 }}>{errorText}</div>
-          )}
-          <div style={{ marginTop: 16 }}>
-            <button style={primaryBtn} onClick={save} disabled={saving || !isDirty}>
+    <Box>
+      <Box sx={{ p: 3, borderBottom: '1px solid #333', bgcolor: 'background.paper' }}>
+        <Typography variant="h4">My Persona</Typography>
+        <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>Configure your civic profile</Typography>
+      </Box>
+      <Box sx={{ p: 3 }}>
+        {errorText && (
+          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setErrorText(null)}>
+            {errorText}
+          </Alert>
+        )}
+        <Paper sx={{ p: 3 }}>
+          <Typography variant="h6" sx={{ mb: 2 }}>Personal Information</Typography>
+          <Box sx={{ display: 'grid', gap: 2 }}>
+            <TextField
+              fullWidth
+              label="Display Name (Optional)"
+              placeholder="How you'd like to be addressed"
+              value={persona.name || ''}
+              onChange={(e) => { setPersona({ ...persona, name: e.target.value }); setIsDirty(true); }}
+            />
+            <TextField
+              fullWidth
+              label="Primary Role"
+              placeholder="e.g., Small Business Owner, Student, Advocate"
+              value={persona.role || ''}
+              onChange={(e) => { setPersona({ ...persona, role: e.target.value }); setIsDirty(true); }}
+            />
+            <TextField
+              fullWidth
+              label="Areas of Interest"
+              placeholder="Environment, Small Business, Tech Policy..."
+              value={interestsText}
+              onChange={(e) => { setInterestsText(e.target.value); setIsDirty(true); }}
+              multiline
+              minRows={4}
+            />
+          </Box>
+          <Box sx={{ mt: 2 }}>
+            <Button variant="contained" onClick={save} disabled={saving || !isDirty}>
               {saving ? 'Saving…' : (isDirty ? 'Save Persona' : 'Saved')}
-            </button>
-          </div>
-        </section>
-      </div>
-    </div>
+            </Button>
+          </Box>
+        </Paper>
+      </Box>
+    </Box>
   );
 }
 

@@ -589,6 +589,16 @@ ipcMain.handle('apiData:clear', async () => {
   return { ok: true };
 });
 
+ipcMain.handle('apiData:fetchNow', async (_event, args) => {
+  try {
+    const url = (args && typeof args.url === 'string' && args.url) ? args.url : apiDataUrl;
+    const payload = await fetchAndPersistApiData(url);
+    return payload;
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
 // --------------------- Recommend relevant boards via local model ---------------------
 
 function getBoardsForPromptFromApiPayload(payload) {
