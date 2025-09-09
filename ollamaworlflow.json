@@ -1,0 +1,87 @@
+
+{
+    "meta": {
+      "instanceId": "your-instance-id"
+    },
+    "nodes": [
+      {
+        "parameters": {
+          "fieldName": "",
+          "include": "noEmpty"
+        },
+        "id": "split-array",
+        "name": "Split Array",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [800, 300]
+      },
+      {
+        "parameters": {
+          "resource": "chat",
+          "operation": "create",
+          "model": "gpt-4o-mini",
+          "messages": {
+            "values": [
+              {
+                "role": "system",
+                "content": "You are a government document analyst. Summarize Federal Register documents clearly and concisely."
+              },
+              {
+                "role": "user", 
+                "content": "=Please analyze this Federal Register document and provide:\n\n**SUMMARY:** (2-3 sentences)\n**KEY POINTS:** (bullet points)\n**IMPORTANT DATES:** (if any)\n**CONTACT INFO:** (if provided)\n**ACTION REQUIRED:** (what readers should know)\n\nDocument:\n{{ $json.text }}"
+              }
+            ]
+          },
+          "options": {
+            "temperature": 0.3,
+            "maxTokens": 800
+          }
+        },
+        "id": "openai-summarize",
+        "name": "OpenAI Summarize",
+        "type": "@n8n/n8n-nodes-langchain.openAi",
+        "typeVersion": 1.4,
+        "position": [1000, 300],
+        "credentials": {
+          "openAiApi": {
+            "id": "your-openai-credentials",
+            "name": "OpenAI API"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Process OpenAI response and structure output\nconst openaiResponse = $input.first().json;\nconst originalDocument = $('Split Array').first().json;\n\n// Extract the summary from OpenAI response\nlet summary = '';\nif (openaiResponse.choices && openaiResponse.choices[0]) {\n  summary = openaiResponse.choices[0].message?.content || '';\n} else if (openaiResponse.text) {\n  summary = openaiResponse.text;\n}\n\n// Create structured output\nconst result = {\n  document_id: `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,\n  original_text_preview: (originalDocument.text || '').substring(0, 300) + '...',\n  original_text_length: (originalDocument.text || '').length,\n  ai_summary: summary.trim(),\n  processed_at: new Date().toISOString(),\n  model_used: 'gpt-4o-mini'\n};\n\nreturn [result];"
+        },
+        "id": "process-openai-response",
+        "name": "Process OpenAI Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [1200, 300]
+      }
+    ],
+    "connections": {
+      "Split Array": {
+        "main": [
+          [
+            {
+              "node": "OpenAI Summarize",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OpenAI Summarize": {
+        "main": [
+          [
+            {
+              "node": "Process OpenAI Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    }
+  }

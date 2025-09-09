@@ -22,6 +22,14 @@
           ]
         },
         "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "21Jl3YnRse9ef0CpNF979NvKHZbioX1RAP46Tv8c"
+            }
+          ]
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -144,8 +152,8 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        1248,
-        -48
+        1712,
+        -32
       ],
       "id": "03e2dfcf-eb57-4f5c-b8af-ac3f50803409",
       "name": "Merge"
@@ -162,8 +170,8 @@
       "type": "n8n-nodes-base.awsS3",
       "typeVersion": 2,
       "position": [
-        1456,
-        -48
+        1888,
+        -32
       ],
       "id": "cfa02c80-89dd-485f-a8d9-d79406eab4a7",
       "name": "Upload a file",
@@ -229,6 +237,115 @@
       ],
       "id": "109323cf-0ac6-4053-a8f4-9963f0e11937",
       "name": "Code2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11435/api/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "llama3.2:1b"
+            },
+            {
+              "name": "prompt",
+              "value": "=Please analyze the following Federal Register document and provide:\n\n1. **ABSTRACT/SUMMARY** (2-3 sentences capturing the main purpose)\n2. **KEY POINTS** (bullet points of the most important information)\n3. **IMPORTANT DATES** (if any)\n4. **CONTACT INFORMATION** (if provided)\n5. **ACTION REQUIRED** (what the public needs to know or do)\n\nDocument text:\n\n{{ $json.text }}\n\n---\n\nPlease format your response clearly with headers and bullet points where appropriate."
+            },
+            {
+              "name": "stream",
+              "value": false
+            },
+            {
+              "name": "options",
+              "value": {
+                "temperature": 0.3,
+                "top_p": 0.9,
+                "max_tokens": 1000
+              }
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "28a2dba2-ea2c-46d5-8061-62785e79e499",
+      "name": "Ollama Text Summarizer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        896,
+        -528
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-3.5-turbo",
+          "mode": "list",
+          "cachedResultName": "GPT-3.5-TURBO"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze this Federal Register document and provide a comprehensive summary in 10 sentences or less. Include: 1) What agency issued this notice and what action they're taking, 2) Who or what is affected, 3) Key requirements or change. Documents may contain multiple distinct notices/actions so for each one do each of these steps.\n\nDocument: {{$json.text}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        1488,
+        -256
+      ],
+      "id": "1b0a85ff-7144-47c5-9307-b67cfb54e682",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "F169arrzssThHDY1",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1264,
+        -256
+      ],
+      "id": "2e723768-8887-4e4f-9411-72ac445f6eba",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract content from OpenAI response objects\nconst allItems = $input.all();\nconst results = [];\n\nfor (const item of allItems) {\n  // Each item.json is already one of the OpenAI response objects\n  const content = item.json.message?.content || null;\n  \n  results.push({\n    json: { content }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        -32
+      ],
+      "id": "66cdc622-2275-424c-9886-83690fb9082a",
+      "name": "Code3"
     }
   ],
   "pinData": {},
@@ -326,9 +443,9 @@
       "main": [
         [
           {
-            "node": "Merge",
+            "node": "Loop Over Items1",
             "type": "main",
-            "index": 1
+            "index": 0
           }
         ]
       ]
@@ -375,13 +492,58 @@
       "main": [
         []
       ]
+    },
+    "Ollama Text Summarizer": {
+      "main": [
+        []
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [
+          {
+            "node": "Code3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code3": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "3512f473-aecc-4f82-b6b8-7b1da006542c",
+  "versionId": "97dd56b3-aa86-49be-9da3-ad58eb160186",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "57da923809da51439b894e9cbb8487d25e9b17747b55bb53f40119dfffcdc195"

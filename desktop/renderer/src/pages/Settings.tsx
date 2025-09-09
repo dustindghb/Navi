@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Paper, Typography, Grid2 as Grid, TextField, MenuItem, Button, Divider, Alert, Collapse } from '@mui/material';
+import { Box, Paper, Typography, Grid2 as Grid, TextField, MenuItem, Button, Divider, Alert, Collapse, Switch, FormControlLabel } from '@mui/material';
 
 // Type definitions for better TypeScript support
 interface OllamaDefaults {
@@ -58,6 +58,10 @@ declare global {
         clear?: () => Promise<{ ok: boolean }>;
         subscribe?: (cb: (payload: ApiDataPayload | null) => void) => () => void;
       };
+      gen?: {
+        getSettings?: () => Promise<{ timeoutMs: number; num_predict: number; num_ctx: number; temperature: number; stream: boolean }>;
+        saveSettings?: (next: { timeoutMs: number; num_predict: number; num_ctx: number; temperature: number; stream: boolean }) => Promise<{ ok: boolean; error?: string }>;
+      };
     };
   }
 }
@@ -74,6 +78,11 @@ export function Settings() {
   const [error, setError] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<ApiDataStatus | null>(null);
   const [apiPayload, setApiPayload] = useState<ApiDataPayload | null>(null);
+  const [genTimeout, setGenTimeout] = useState(150000);
+  const [genMaxTokens, setGenMaxTokens] = useState(64);
+  const [genCtx, setGenCtx] = useState(8192);
+  const [genTemp, setGenTemp] = useState(0.05);
+  const [genStream, setGenStream] = useState(true);
 
   useEffect(() => {
     async function loadDefaults() {
@@ -94,6 +103,31 @@ export function Settings() {
 
     loadDefaults();
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const s = await window.ollama?.gen?.getSettings?.();
+        if (s) {
+          setGenTimeout(s.timeoutMs);
+          setGenMaxTokens(s.num_predict);
+          setGenCtx(s.num_ctx);
+          setGenTemp(s.temperature);
+          setGenStream(!!s.stream);
+        }
+      } catch (e) {}
+    })();
+  }, []);
+
+  async function saveGenSettings() {
+    try {
+      const next = { timeoutMs: Number(genTimeout), num_predict: Number(genMaxTokens), num_ctx: Number(genCtx), temperature: Number(genTemp), stream: !!genStream };
+      const res = await window.ollama?.gen?.saveSettings?.(next);
+      if (!res?.ok) setError(res?.error || 'Failed to save generation settings');
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    }
+  }
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -311,6 +345,30 @@ export function Settings() {
             <Details title="Logs" data={checkRes.logs} />
           </Paper>
         )}
+
+        <Paper sx={{ p: 3, mt: 3 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>Model Generation Settings</Typography>
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <TextField fullWidth label="Timeout (ms)" type="number" value={genTimeout} onChange={(e) => setGenTimeout(Number(e.target.value))} />
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <TextField fullWidth label="Max tokens (num_predict)" type="number" value={genMaxTokens} onChange={(e) => setGenMaxTokens(Number(e.target.value))} />
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <TextField fullWidth label="Context size (num_ctx)" type="number" value={genCtx} onChange={(e) => setGenCtx(Number(e.target.value))} />
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <TextField fullWidth label="Temperature" type="number" inputProps={{ step: 0.01 }} value={genTemp} onChange={(e) => setGenTemp(Number(e.target.value))} />
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <FormControlLabel control={<Switch checked={genStream} onChange={(e) => setGenStream(e.target.checked)} />} label="Enable streaming (recommended)" />
+            </Grid>
+          </Grid>
+          <Box sx={{ mt: 2 }}>
+            <Button variant="contained" onClick={saveGenSettings}>Save Generation Settings</Button>
+          </Box>
+        </Paper>
 
         <Paper sx={{ p: 3, mt: 3 }}>
           <Typography variant="h6" sx={{ mb: 1 }}>Public API Data</Typography>

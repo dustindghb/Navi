@@ -199,6 +199,26 @@ async function testGenerate(baseURL, modelName) {
   }
 }
 
+async function callOllamaChat(baseURL, payload, { timeoutMs = 180000 } = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${baseURL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status}` };
+    const data = await res.json();
+    return { ok: true, data };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function listModelsViaCLI(baseURL) {
   const env = { OLLAMA_HOST: baseURL };
   const jsonAttempt = await execCommandWithEnv('ollama list --json', env);
@@ -387,6 +407,25 @@ ipcMain.handle('ollama:promptStart', async () => {
   return { started: false };
 });
 
+// --------------------- Generic Chat IPC ---------------------
+
+ipcMain.handle('chat:send', async (_event, args) => {
+  const { model = 'gpt-oss:20b', messages = [], options = {}, stream = false, keep_alive = -1 } = args || {};
+  try {
+    const baseURL = await detectOllamaBaseURLForUse();
+    const serverUp = await isServerRunning(baseURL);
+    if (!serverUp) {
+      return { ok: false, error: 'Local model server is not running.' };
+    }
+    const payload = { model, messages, options, stream: !!stream, keep_alive };
+    const res = await callOllamaChat(baseURL, payload, { timeoutMs: 180000 });
+    if (!res.ok) return res;
+    return { ok: true, baseURL, response: res.data?.message?.content || res.data?.response || '', raw: res.data };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
 // --------------------- Persona persistence ---------------------
 
 function getPersonaPath() {
@@ -548,5 +587,284 @@ ipcMain.handle('apiData:clear', async () => {
   lastApiDataPayload = null;
   broadcastApiDataUpdate(null);
   return { ok: true };
+});
+
+// --------------------- Recommend relevant boards via local model ---------------------
+
+function getBoardsForPromptFromApiPayload(payload) {
+  if (!payload || !payload.data || !Array.isArray(payload.data.items)) return [];
+  const items = payload.data.items;
+  return items.map((it) => {
+    const d = it?.data || {};
+    const text = (d?.text && String(d.text).trim())
+      || (d?.message?.content && String(d.message.content).trim())
+      || (d?.highlightedContent && String(d.highlightedContent).trim())
+      || ([d?.title, d?.documentType, d?.subtype].filter(Boolean).join(' — ').trim());
+    return {
+      key: it?.key || d?.documentId || '',
+      agencyId: d?.agencyId || '',
+      text: text || '',
+    };
+  });
+}
+
+async function detectOllamaBaseURLForUse() {
+  // Prefer env → 11434 → 11435
+  let base = null;
+  const env = parseEnvBase();
+  if (env) base = toBaseURL(env.host, env.port);
+  if (!base) base = toBaseURL(DEFAULT_OLLAMA_HOST, DEFAULT_OLLAMA_PORT);
+  if (await isServerRunning(base)) return base;
+  const alt = toBaseURL(DEFAULT_OLLAMA_HOST, 11435);
+  if (await isServerRunning(alt)) return alt;
+  return base; // fallback; may not be running
+}
+
+async function generateJsonWithModel(baseURL, modelName, prompt, { temperature = 0.1, num_predict = 64, num_ctx = 8192, timeoutMs = 150000, stream = false, onToken, system, enforceJson = true } = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${baseURL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelName,
+        prompt,
+        system: system || undefined,
+        stream: !!stream,
+        format: enforceJson ? 'json' : undefined,
+        options: { temperature, num_predict, num_ctx }
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    if (!stream) {
+      const data = await res.json();
+      let text = data?.response || '';
+      if (!enforceJson) {
+        return { ok: true, json: null, raw: text };
+      }
+      let parsed = null;
+      try { parsed = JSON.parse(text); } catch (e) {
+        const m = text.match(/\{[\s\S]*\}/);
+        if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+      }
+      if (!parsed) return { ok: false, error: 'Model did not return valid JSON', raw: text };
+      return { ok: true, json: parsed, raw: text };
+    }
+    // Streaming mode: accumulate tokens from NDJSON
+    const reader = res.body?.getReader?.();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let full = '';
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line) continue;
+        try {
+          const obj = JSON.parse(line);
+          if (typeof obj?.response === 'string' && obj.response) {
+            full += obj.response;
+            try { if (onToken) onToken(obj.response); } catch {}
+          }
+          if (obj?.done) {
+            // finalize
+          }
+        } catch {}
+      }
+    }
+    if (!enforceJson) {
+      return { ok: true, json: null, raw: full };
+    }
+    // Parse final text as JSON
+    let parsed = null;
+    try { parsed = JSON.parse(full); } catch (e) {
+      const m = full.match(/\{[\s\S]*\}/);
+      if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+    }
+    if (!parsed) return { ok: false, error: 'Model did not return valid JSON', raw: full };
+    return { ok: true, json: parsed, raw: full };
+  } catch (e) {
+    const message = String(e);
+    const timedOut = message.includes('AbortError') || message.includes('The operation was aborted');
+    return { ok: false, error: message, timedOut };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// --------------------- Generation settings persistence ---------------------
+
+function getGenSettingsPath() {
+  const dir = app.getPath('userData');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return path.join(dir, 'gen-settings.json');
+}
+
+function loadGenSettings() {
+  const defaults = { timeoutMs: 180000, num_predict: 24, num_ctx: 4096, temperature: 0.0, stream: false };
+  try {
+    const p = getGenSettingsPath();
+    if (!fs.existsSync(p)) return defaults;
+    const raw = fs.readFileSync(p, 'utf8');
+    const obj = JSON.parse(raw);
+    return { ...defaults, ...obj };
+  } catch {
+    return defaults;
+  }
+}
+
+function saveGenSettings(next) {
+  try {
+    const p = getGenSettingsPath();
+    fs.writeFileSync(p, JSON.stringify(next || {}, null, 2), 'utf8');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+ipcMain.handle('gen:getSettings', async () => loadGenSettings());
+ipcMain.handle('gen:saveSettings', async (_event, next) => saveGenSettings(next));
+
+function buildPerItemPrompt(personaSummary, board) {
+  const textSnippet = String(board.text || '').split(/\s+/).slice(0, 150).join(' ');
+  const compactBoard = { key: board.key, agencyId: board.agencyId, text: textSnippet };
+  const instruction = {
+    task: 'Decide if the public comment board is relevant to the persona based on the agency and the excerpt.',
+    output: 'Reply exactly as: "Yes — <brief reason>" or "No — <brief reason>" (<=10 words). No other text.'
+  };
+  return `Instruction:\n${JSON.stringify(instruction)}\n\nPersona:\n${JSON.stringify(personaSummary)}\n\nBoard:\n${JSON.stringify(compactBoard)}`;
+}
+
+ipcMain.handle('recommend:findRelevantBoards', async (event, args) => {
+  const { modelName = 'gpt-oss:20b', personaOverride = null, itemsOverride = null } = args || {};
+  try {
+    const genSettings = loadGenSettings();
+    // Persona
+    let persona = personaOverride;
+    if (!persona) {
+      try {
+        const file = getPersonaPath();
+        if (fs.existsSync(file)) {
+          persona = JSON.parse(fs.readFileSync(file, 'utf8'));
+        }
+      } catch {}
+    }
+    persona = persona || {};
+
+    // Items
+    let itemsPayload = itemsOverride;
+    if (!itemsPayload) {
+      if (!lastApiDataPayload) {
+        try { lastApiDataPayload = readApiDataFromDisk(); } catch {}
+      }
+      itemsPayload = lastApiDataPayload || null;
+    }
+    const promptItems = getBoardsForPromptFromApiPayload(itemsPayload);
+    const itemMap = new Map();
+    if (Array.isArray(itemsPayload?.data?.items)) {
+      for (const it of itemsPayload.data.items) {
+        const key = it?.key || it?.data?.documentId || '';
+        if (key) itemMap.set(key, it);
+      }
+    }
+
+    // Persona summary kept compact
+    const personaSummary = {
+      name: persona?.name || '',
+      role: persona?.role || '',
+      interests: Array.isArray(persona?.interests) ? persona.interests : [],
+    };
+
+    // Detect model server
+    const baseURL = await detectOllamaBaseURLForUse();
+    const serverUp = await isServerRunning(baseURL);
+    if (!serverUp) {
+      return { ok: false, error: 'Local model server is not running.' };
+    }
+
+    // Evaluate each item separately to avoid context truncation
+    const perItemResults = [];
+    const debug = [];
+    const systemPrompt = 'You are a concise classifier. Reply only with "Yes — <reason>" or "No — <reason>". No preamble, no JSON, no extra text.';
+    for (const board of promptItems) {
+      const prompt = buildPerItemPrompt(personaSummary, board);
+      try { event?.sender?.send('recommend:progress', { phase: 'start', key: board.key, prompt }); } catch {}
+      let gen = await generateJsonWithModel(baseURL, modelName, prompt, {
+        temperature: 0.0,
+        num_predict: Math.max(32, Math.min(96, (genSettings.num_predict || 48))),
+        num_ctx: Math.min(4096, genSettings.num_ctx || 4096),
+        timeoutMs: Math.min(180000, genSettings.timeoutMs || 180000),
+        stream: false,
+        system: systemPrompt,
+        enforceJson: false,
+        onToken: (tok) => {
+          try { event?.sender?.send('recommend:progress', { phase: 'token', key: board.key, token: tok }); } catch {}
+        }
+      });
+      if (!gen.ok) {
+        // Retry once with shorter output and longer timeout
+        gen = await generateJsonWithModel(baseURL, modelName, prompt, {
+          temperature: 0.0,
+          num_predict: 48,
+          num_ctx: Math.min(4096, genSettings.num_ctx || 4096),
+          timeoutMs: 180000,
+          stream: false,
+          system: systemPrompt,
+          enforceJson: false,
+          onToken: (tok) => {
+            try { event?.sender?.send('recommend:progress', { phase: 'token', key: board.key, token: tok }); } catch {}
+          }
+        });
+        if (!gen.ok) {
+          perItemResults.push({ key: board.key, score: 0, reason: `error: ${gen.error || 'gen failed'}`, relevant: false });
+          debug.push({ key: board.key, prompt, response: gen.raw || '', error: gen.error || 'gen failed' });
+          try { event?.sender?.send('recommend:progress', { phase: 'error', key: board.key, error: gen.error || 'gen failed', response: gen.raw || '' }); } catch {}
+          continue;
+        }
+      }
+      // Derive relevance from raw text: expect "Yes — <reason>" or "No — <reason>"
+      const raw = gen.raw || '';
+      const firstLine = String(raw).trim().split(/\r?\n/)[0] || '';
+      let relevant = false;
+      let reason = '';
+      const m = firstLine.match(/^(yes|no)\b[\s:–—-]*([^]*)$/i);
+      if (m) {
+        relevant = /^yes$/i.test(m[1]);
+        reason = (m[2] || '').trim();
+      } else {
+        const lower = firstLine.toLowerCase();
+        if (lower.includes('not relevant')) relevant = false; else if (lower.includes('relevant')) relevant = true;
+        reason = firstLine.slice(0, 120).trim();
+      }
+      const key = board.key;
+      const score = relevant ? 1 : 0;
+      perItemResults.push({ key, relevant, score, reason });
+      debug.push({ key, prompt, response: raw, mode: 'text' });
+      try { event?.sender?.send('recommend:progress', { phase: 'response', key, response: raw }); } catch {}
+    }
+
+    // Rehydrate full items and filter relevant
+    const enriched = perItemResults
+      .filter((r) => r.relevant)
+      .map((r) => {
+        const item = r.key ? itemMap.get(r.key) : null;
+        const full = item?.data ? item.data : null;
+        return full ? { key: r.key, score: r.score, reason: r.reason, item: full } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.score - a.score));
+
+    return { ok: true, relevant: enriched, baseURL, modelName, debug };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
 });
 

@@ -61,6 +61,29 @@ contextBridge.exposeInMainWorld('ollama', {
         try { ipcRenderer.removeListener('apiData:update', listener) } catch {}
       }
     }
+  },
+  recommend: {
+    findRelevantBoards: async (modelName, persona, itemsPayload) => {
+      return await ipcRenderer.invoke('recommend:findRelevantBoards', { modelName, personaOverride: persona, itemsOverride: itemsPayload })
+    },
+    onProgress: (callback) => {
+      const listener = (_event, payload) => { try { callback(payload) } catch {} }
+      ipcRenderer.on('recommend:progress', listener)
+      return () => { try { ipcRenderer.removeListener('recommend:progress', listener) } catch {} }
+    }
+  },
+  gen: {
+    getSettings: async () => {
+      return await ipcRenderer.invoke('gen:getSettings')
+    },
+    saveSettings: async (next) => {
+      return await ipcRenderer.invoke('gen:saveSettings', next)
+    }
+  },
+  chat: {
+    send: async (model, messages, options = {}, stream = false, keep_alive = -1) => {
+      return await ipcRenderer.invoke('chat:send', { model, messages, options, stream, keep_alive })
+    }
   }
 })
 
