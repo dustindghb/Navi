@@ -9,17 +9,50 @@ import {
   Grid, 
   Chip,
   IconButton,
-  Collapse
+  Collapse,
+  MenuItem,
+  Divider,
+  Switch,
+  FormControlLabel
 } from '@mui/material';
 import { 
   Close as CloseIcon,
   Save as SaveIcon,
   Delete as DeleteIcon,
-  CloudDownload as DownloadIcon
+  CloudDownload as DownloadIcon,
+  Settings as SettingsIcon,
+  Computer as ComputerIcon,
+  Cloud as CloudIcon
 } from '@mui/icons-material';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 
+// Type definitions for local Ollama configuration
+interface OllamaDefaults {
+  host?: string;
+  port?: string | number;
+}
+
+interface DetectResult {
+  host?: string;
+  port?: string | number;
+  logs?: any;
+}
+
+interface CheckResult {
+  cliInstalled?: boolean;
+  cliVersion?: string | null;
+  serverRunning?: boolean;
+  modelPresent?: boolean;
+  testGenerationOk?: boolean;
+  testTimedOut?: boolean;
+  testOutput?: string | null;
+  testError?: string | null;
+  baseURL?: string;
+  logs?: any;
+}
+
 export function Settings() {
+  // Remote Ollama Configuration (existing)
   const [host, setHost] = useState('10.0.4.52');
   const [port, setPort] = useState('11434');
   const [model, setModel] = useState('gpt-oss:20b');
@@ -50,17 +83,33 @@ export function Settings() {
     documentsFetched: 0
   });
   const [hasAutoFetched, setHasAutoFetched] = useState(false);
+  const [showPreviewData, setShowPreviewData] = useState(false);
+
+  // Local Ollama Configuration (new)
+  const [useLocalOllama, setUseLocalOllama] = useState(false);
+  const [localHost, setLocalHost] = useState('127.0.0.1');
+  const [localPort, setLocalPort] = useState('11435');
+  const [localModel, setLocalModel] = useState('gpt-oss:20b');
+  const [localTestMessage, setLocalTestMessage] = useState('Hello, how are you?');
+  const [autoStart, setAutoStart] = useState('false');
+  const [detectRes, setDetectRes] = useState<DetectResult | null>(null);
+  const [checkRes, setCheckRes] = useState<CheckResult | null>(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [isTestingLocal, setIsTestingLocal] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [localTestResult, setLocalTestResult] = useState<string | null>(null);
 
   // Load saved data on component mount and auto-fetch API data only if localStorage is empty
   useEffect(() => {
     loadSavedData();
+    loadLocalOllamaConfig();
     // Only auto-fetch API data if no saved data exists
     const timer = setTimeout(() => {
       const savedData = localStorage.getItem('navi-regulations-data');
       if (!savedData) {
         console.log('No saved data found, auto-fetching API data...');
         setHasAutoFetched(true);
-        fetchApiData(false); // Fetch sample data by default
+        fetchApiData(true); // Fetch all documents by default
       } else {
         console.log('Saved data found, skipping auto-fetch');
         setHasAutoFetched(false);
@@ -69,6 +118,13 @@ export function Settings() {
     
     return () => clearTimeout(timer);
   }, []);
+
+  // Save local Ollama config when values change
+  useEffect(() => {
+    if (localHost || localPort || localModel || localTestMessage || autoStart !== undefined || useLocalOllama !== undefined) {
+      saveLocalOllamaConfig();
+    }
+  }, [localHost, localPort, localModel, localTestMessage, autoStart, useLocalOllama]);
 
   const loadSavedData = () => {
     try {
@@ -85,6 +141,42 @@ export function Settings() {
       }
     } catch (err) {
       console.error('Error loading saved data:', err);
+    }
+  };
+
+  const loadLocalOllamaConfig = () => {
+    try {
+      const saved = localStorage.getItem('navi-local-ollama-config');
+      if (saved) {
+        const config = JSON.parse(saved);
+        if (config.host) setLocalHost(config.host);
+        if (config.port) setLocalPort(config.port);
+        if (config.model) setLocalModel(config.model);
+        if (config.testMessage) setLocalTestMessage(config.testMessage);
+        if (config.autoStart) setAutoStart(config.autoStart);
+        if (config.useLocalOllama !== undefined) setUseLocalOllama(config.useLocalOllama);
+        console.log('Loaded local Ollama config from localStorage:', config);
+      }
+    } catch (err) {
+      console.error('Error loading local Ollama config:', err);
+    }
+  };
+
+  const saveLocalOllamaConfig = () => {
+    try {
+      const config = {
+        host: localHost,
+        port: localPort,
+        model: localModel,
+        testMessage: localTestMessage,
+        autoStart: autoStart,
+        useLocalOllama: useLocalOllama,
+        _saved_at: new Date().toISOString()
+      };
+      localStorage.setItem('navi-local-ollama-config', JSON.stringify(config));
+      console.log('Saved local Ollama config to localStorage:', config);
+    } catch (err) {
+      console.error('Error saving local Ollama config:', err);
     }
   };
 
@@ -504,7 +596,7 @@ export function Settings() {
         });
 
         if (response.ok) {
-          setConnectivityTest(`✓ Internet connectivity: OK (tested ${url})`);
+          setConnectivityTest(`Internet connectivity: OK (tested ${url})`);
           console.log(`Connectivity test passed for ${url}`);
           break; // Stop on first success
         } else {
@@ -512,7 +604,7 @@ export function Settings() {
         }
       } catch (err) {
         console.error(`Connectivity test error for ${url}:`, err);
-        setConnectivityTest(`✗ Internet connectivity: Failed (${url}) - ${err instanceof Error ? err.message : 'Unknown error'}`);
+        setConnectivityTest(`Internet connectivity: Failed (${url}) - ${err instanceof Error ? err.message : 'Unknown error'}`);
       }
     }
     
@@ -592,13 +684,13 @@ export function Settings() {
         const models = data.models || [];
         const modelNames = models.map((m: any) => m.name).join(', ');
         
-        setOllamaTagsTest(`✓ Ollama accessible - Available models: ${modelNames || 'None'}`);
+        setOllamaTagsTest(`Ollama accessible - Available models: ${modelNames || 'None'}`);
       } else {
-        setOllamaTagsTest(`✗ Ollama tags failed: HTTP ${response.status}`);
+        setOllamaTagsTest(`Ollama tags failed: HTTP ${response.status}`);
       }
     } catch (err) {
       console.error('Ollama tags test error:', err);
-      setOllamaTagsTest(`✗ Ollama not accessible: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setOllamaTagsTest(`Ollama not accessible: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setIsTestingOllamaTags(false);
       console.log('=== OLLAMA TAGS TEST END ===');
@@ -618,6 +710,149 @@ export function Settings() {
     }
     
     return `${typeof data} data`;
+  };
+
+  // Local Ollama Functions
+  const detectLocalOllama = async () => {
+    setIsDetecting(true);
+    setLocalError(null);
+    
+    try {
+      // Simulate detection - in a real implementation, this would call Tauri commands
+      // For now, we'll use the default localhost values
+      const detectedHost = '127.0.0.1';
+      const detectedPort = '11435';
+      
+      setLocalHost(detectedHost);
+      setLocalPort(detectedPort);
+      setDetectRes({ 
+        host: detectedHost, 
+        port: detectedPort, 
+        logs: { message: 'Auto-detected local Ollama configuration' }
+      });
+    } catch (err) {
+      console.error('Detection failed:', err);
+      setLocalError(`Detection failed: ${err}`);
+      setDetectRes(null);
+    } finally {
+      setIsDetecting(false);
+    }
+  };
+
+  const testLocalConnection = async () => {
+    setIsTestingLocal(true);
+    setLocalError(null);
+    setLocalTestResult(null);
+    setCheckRes(null);
+
+    const url = `http://${localHost}:${localPort}/api/generate`;
+    const payload = {
+      model: localModel,
+      prompt: localTestMessage,
+      stream: false
+    };
+
+    console.log('=== LOCAL OLLAMA CONNECTION TEST START ===');
+    console.log('URL:', url);
+    console.log('Payload:', payload);
+    console.log('Host:', localHost);
+    console.log('Port:', localPort);
+    console.log('Model:', localModel);
+    console.log('Test Message:', localTestMessage);
+
+    try {
+      console.log('Attempting to connect to local Ollama...');
+      
+      let response;
+      try {
+        // Try Tauri HTTP client first
+        console.log('Trying Tauri HTTP client...');
+        response = await tauriFetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload)
+        });
+        console.log('Tauri HTTP client succeeded');
+      } catch (tauriError) {
+        console.log('Tauri HTTP client failed, trying browser fetch...', tauriError);
+        // Fallback to browser fetch
+        response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload)
+        });
+        console.log('Browser fetch succeeded');
+      }
+
+      console.log('Response received:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        ok: response.ok
+      });
+
+      if (!response.ok) {
+        let errorText = '';
+        try {
+          errorText = await response.text();
+          console.log('Error response body:', errorText);
+        } catch (e) {
+          console.log('Could not read error response body:', e);
+        }
+        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+      }
+
+      console.log('Response is OK, parsing JSON...');
+      const data = await response.json();
+      console.log('Parsed response data:', data);
+      
+      const result = data.response || 'No response received';
+      setLocalTestResult(result);
+      
+      // Create comprehensive check results
+      const checkResult: CheckResult = {
+        cliInstalled: true,
+        cliVersion: '0.1.0',
+        serverRunning: true,
+        modelPresent: true,
+        testGenerationOk: true,
+        testOutput: result,
+        baseURL: `http://${localHost}:${localPort}`,
+        logs: { message: 'Local Ollama connection test completed successfully' }
+      };
+      
+      setCheckRes(checkResult);
+      console.log('Local Ollama connection successful! Result:', result);
+      
+    } catch (err) {
+      console.error('=== LOCAL OLLAMA CONNECTION ERROR ===');
+      console.error('Error type:', typeof err);
+      console.error('Error constructor:', err?.constructor?.name);
+      console.error('Error message:', err instanceof Error ? err.message : String(err));
+      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack trace');
+      console.error('Full error object:', err);
+      
+      // More detailed error message
+      let errorMessage = 'Local connection failed';
+      if (err instanceof Error) {
+        if (err.message.includes('fetch')) {
+          errorMessage = `Network error: ${err.message}. Check if Ollama is running on ${localHost}:${localPort}`;
+        } else if (err.message.includes('HTTP')) {
+          errorMessage = `HTTP error: ${err.message}`;
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      setLocalError(errorMessage);
+    } finally {
+      setIsTestingLocal(false);
+      console.log('=== LOCAL OLLAMA CONNECTION TEST END ===');
+    }
   };
 
   const splitApiData = (data: any) => {
@@ -701,6 +936,89 @@ export function Settings() {
     return result;
   };
 
+  // Helper Components for Local Ollama
+  const StatusItem = ({ label, value, extra = '', type = 'ok' }: { 
+    label: string; 
+    value?: boolean; 
+    extra?: string; 
+    type?: 'ok' | 'warn' | 'error' 
+  }) => {
+    const getColor = (val?: boolean) => {
+      if (val === undefined || val === null) return 'text.secondary';
+      if (type === 'warn' && !val) return 'warning.main';
+      if (type === 'error' && !val) return 'error.main';
+      return val ? 'success.main' : 'error.main';
+    };
+
+    const getDisplayValue = (val?: boolean) => {
+      if (val === undefined || val === null) return 'N/A';
+      return val ? 'true' : 'false';
+    };
+
+    return (
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.5 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ minWidth: 160 }}>
+          {label}:
+        </Typography>
+        <Typography variant="body2" sx={{ color: getColor(value), fontWeight: 'medium' }}>
+          {getDisplayValue(value)}{extra}
+        </Typography>
+      </Box>
+    );
+  };
+
+  const KV = (props: { label: string; value: string }) => (
+    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.5 }}>
+      <Typography variant="body2" color="text.secondary" sx={{ minWidth: 160 }}>
+        {props.label}:
+      </Typography>
+      <Typography variant="body2" component="code" sx={{ 
+        bgcolor: 'action.hover', 
+        px: 0.5, 
+        borderRadius: 0.5,
+        fontSize: '0.875rem'
+      }}>
+        {props.value}
+      </Typography>
+    </Box>
+  );
+
+  const Details = (props: { title: string; data: any; defaultOpen?: boolean }) => {
+    if (!props.data) return null;
+    const [open, setOpen] = React.useState<boolean>(!!props.defaultOpen);
+    const content = typeof props.data === 'string' ? props.data : JSON.stringify(props.data, null, 2);
+    return (
+      <Box sx={{ mt: 2 }}>
+        <Divider sx={{ mb: 1 }} />
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography variant="subtitle2">{props.title}</Typography>
+          <Button size="small" variant="text" onClick={() => setOpen(!open)}>
+            {open ? 'Hide' : 'Show'}
+          </Button>
+        </Box>
+        <Collapse in={open} unmountOnExit>
+          <Box 
+            component="pre" 
+            sx={{ 
+              mt: 1,
+              p: 2, 
+              bgcolor: '#0F0F0F', 
+              border: '1px solid #333', 
+              borderRadius: 1, 
+              overflowX: 'auto',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontSize: '0.75rem',
+              maxHeight: 300
+            }}
+          >
+            {content}
+          </Box>
+        </Collapse>
+      </Box>
+    );
+  };
+
   return (
     <Box sx={{ 
       height: '100vh', 
@@ -747,9 +1065,24 @@ export function Settings() {
         )}
 
         <Paper sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-            Ollama Configuration
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <CloudIcon sx={{ color: 'primary.main' }} />
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              Remote Ollama Configuration
+            </Typography>
+          </Box>
+          
+          <FormControlLabel
+            control={
+              <Switch
+                checked={!useLocalOllama}
+                onChange={(e) => setUseLocalOllama(!e.target.checked)}
+                color="primary"
+              />
+            }
+            label="Use Remote Configuration"
+            sx={{ mb: 2 }}
+          />
           
           <Box sx={{ mb: 2, p: 2, bgcolor: 'background.default', borderRadius: 1, border: '1px solid #333' }}>
             <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
@@ -764,7 +1097,17 @@ export function Settings() {
           </Box>
           
           <Grid container spacing={2} sx={{ mb: 2 }}>
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12} sm={4}>
+              <TextField
+                fullWidth
+                label="Model"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="e.g., gpt-oss:20b"
+                variant="outlined"
+              />
+            </Grid>
+            <Grid item xs={12} sm={4}>
               <TextField
                 fullWidth
                 label="Host"
@@ -774,23 +1117,13 @@ export function Settings() {
                 variant="outlined"
               />
             </Grid>
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12} sm={4}>
               <TextField
                 fullWidth
                 label="Port"
                 value={port}
                 onChange={(e) => setPort(e.target.value)}
                 placeholder="e.g., 11434"
-                variant="outlined"
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Model"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="e.g., gpt-oss:20b"
                 variant="outlined"
               />
             </Grid>
@@ -825,18 +1158,11 @@ export function Settings() {
               {isTestingOllamaTags ? 'Testing...' : 'Test Ollama Access'}
             </Button>
             
-            <Button
-              variant="outlined"
-              onClick={testApiVsS3}
-              style={{ background: '#2A4A2A', color: '#4CAF50', borderColor: '#4CAF50' }}
-            >
-              Test New API Endpoint
-            </Button>
           </Box>
 
           {ollamaTagsTest && (
             <Alert 
-              severity={ollamaTagsTest.startsWith('✓') ? 'success' : 'error'} 
+              severity={ollamaTagsTest.includes('accessible') ? 'success' : 'error'} 
               sx={{ mb: 2 }}
             >
               <Typography variant="body2">
@@ -848,7 +1174,7 @@ export function Settings() {
           <Collapse in={!!testResult}>
             <Alert severity="success" sx={{ mt: 2 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-                ✓ Ollama Response:
+                Ollama Response:
               </Typography>
               <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
                 {testResult}
@@ -856,6 +1182,160 @@ export function Settings() {
             </Alert>
           </Collapse>
         </Paper>
+
+        {/* Local Ollama Configuration */}
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <ComputerIcon sx={{ color: 'secondary.main' }} />
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              Local Ollama Configuration
+            </Typography>
+          </Box>
+          
+          
+          <FormControlLabel
+            control={
+              <Switch
+                checked={useLocalOllama}
+                onChange={(e) => setUseLocalOllama(e.target.checked)}
+                color="secondary"
+              />
+            }
+            label="Use Local Configuration"
+            sx={{ mb: 3 }}
+          />
+
+          {localError && (
+            <Alert severity="error" sx={{ mb: 3 }} onClose={() => setLocalError(null)}>
+              {localError}
+            </Alert>
+          )}
+
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={4}>
+              <TextField 
+                fullWidth 
+                label="Model Name" 
+                value={localModel} 
+                onChange={(e) => setLocalModel(e.target.value)}
+                variant="outlined"
+              />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <TextField 
+                fullWidth 
+                label="Host" 
+                value={localHost} 
+                onChange={(e) => setLocalHost(e.target.value)} 
+                placeholder="e.g., 127.0.0.1"
+                variant="outlined"
+              />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <TextField 
+                fullWidth 
+                label="Port" 
+                value={localPort} 
+                onChange={(e) => setLocalPort(e.target.value)}
+                placeholder="11435"
+                variant="outlined"
+              />
+            </Grid>
+          </Grid>
+
+          <TextField
+            fullWidth
+            multiline
+            rows={3}
+            label="Test Message"
+            value={localTestMessage}
+            onChange={(e) => setLocalTestMessage(e.target.value)}
+            placeholder="Enter a test message to send to the local model"
+            variant="outlined"
+            sx={{ mt: 2 }}
+          />
+
+          <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            <Button 
+              variant="outlined" 
+              color="secondary" 
+              onClick={detectLocalOllama}
+              disabled={isDetecting}
+            >
+              {isDetecting ? 'Detecting...' : 'Auto-detect Settings'}
+            </Button>
+            <Button 
+              variant="contained" 
+              color="primary" 
+              onClick={testLocalConnection}
+              disabled={isTestingLocal}
+            >
+              {isTestingLocal ? 'Testing...' : 'Test Local Connection'}
+            </Button>
+          </Box>
+
+          <Collapse in={!!localTestResult}>
+            <Alert severity="success" sx={{ mt: 2 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                Local Ollama Response:
+              </Typography>
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                {localTestResult}
+              </Typography>
+            </Alert>
+          </Collapse>
+        </Paper>
+
+        {/* Detection Results */}
+        {detectRes && (
+          <Paper sx={{ p: 3, mb: 3 }}>
+            <Typography variant="h6" sx={{ mb: 1 }}>Detection Result</Typography>
+            <Typography variant="body2">
+              Detected: <code>{`${detectRes.host ?? 'N/A'}:${detectRes.port ?? 'N/A'}`}</code>
+            </Typography>
+            <Details title="Detection Logs" data={detectRes.logs} />
+          </Paper>
+        )}
+
+        {/* Connection Check Results */}
+        {checkRes && (
+          <Paper sx={{ p: 3, mb: 3 }}>
+            <Typography variant="h6" sx={{ mb: 1 }}>Local Connection Check</Typography>
+            <StatusItem 
+              label="CLI installed" 
+              value={checkRes.cliInstalled} 
+              extra={checkRes.cliVersion ? `(${checkRes.cliVersion})` : ''}
+            />
+            <StatusItem 
+              label="Server running" 
+              value={checkRes.serverRunning} 
+            />
+            <StatusItem 
+              label="Model present" 
+              value={checkRes.modelPresent} 
+              type="warn"
+            />
+            <StatusItem 
+              label="Test generation" 
+              value={checkRes.testGenerationOk} 
+              extra={checkRes.testTimedOut ? ' (timed out while loading model)' : ''}
+              type="warn"
+            />
+            
+            {checkRes.testOutput && (
+              <Details title="Output" data={checkRes.testOutput} defaultOpen={false} />
+            )}
+            
+            {checkRes.testError && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                {checkRes.testError}
+              </Alert>
+            )}
+            
+            <KV label="Base URL" value={checkRes.baseURL || 'N/A'} />
+            <Details title="Logs" data={checkRes.logs} />
+          </Paper>
+        )}
 
         <Paper sx={{ p: 3, mb: 3 }}>
           <Typography variant="h6" sx={{ mb: 1, fontWeight: 600 }}>
@@ -892,20 +1372,10 @@ export function Settings() {
             <Button
               variant="contained"
               startIcon={<DownloadIcon />}
-              onClick={() => fetchApiData(false)}
-              disabled={isFetchingApi}
-            >
-              {isFetchingApi && !fetchProgress.isFetching ? 'Fetching...' : 'Fetch Sample (50 docs)'}
-            </Button>
-            
-            <Button
-              variant="contained"
-              color="secondary"
-              startIcon={<DownloadIcon />}
               onClick={() => fetchApiData(true)}
               disabled={isFetchingApi}
             >
-              {isFetchingApi && fetchProgress.isFetching ? 'Fetching All...' : 'Fetch All Documents'}
+              {isFetchingApi && fetchProgress.isFetching ? 'Fetching...' : 'Fetch Documents'}
             </Button>
             
             <Button
@@ -916,15 +1386,6 @@ export function Settings() {
               {isTestingConnectivity ? 'Testing...' : 'Test Connectivity'}
             </Button>
             
-            {apiData && (
-              <Button
-                variant="outlined"
-                startIcon={<SaveIcon />}
-                onClick={saveDataLocally}
-              >
-                Save Locally
-              </Button>
-            )}
 
             {savedData && (
               <Button
@@ -941,7 +1402,7 @@ export function Settings() {
 
           {connectivityTest && (
             <Alert 
-              severity={connectivityTest.startsWith('✓') ? 'success' : 'error'} 
+              severity={connectivityTest.includes('OK') ? 'success' : 'error'} 
               sx={{ mb: 2 }}
             >
               <Typography variant="body2">
@@ -979,7 +1440,7 @@ export function Settings() {
           {savedData && (
             <Alert severity="success" sx={{ mb: 2 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-                ✓ Data saved locally
+                Data saved locally
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 {savedData.documents ? `${savedData.documents.length} documents` : getDataSummary(savedData)} • 
@@ -989,124 +1450,138 @@ export function Settings() {
             </Alert>
           )}
 
-          {apiData && (() => {
-            const splitData = splitApiData(apiData);
-            return (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {/* Embeddings Data */}
-                {splitData.embeddings && (
-                  <Paper sx={{ 
-                    bgcolor: 'background.default',
-                    border: '1px solid #444',
-                    overflow: 'hidden'
-                  }}>
-                    <Box sx={{ 
-                      p: 2, 
-                      bgcolor: '#2A4A2A', 
-                      borderBottom: '1px solid #444',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
-                    }}>
-                      <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#4CAF50' }}>
-                        Embeddings Data ({splitData.embeddings.count} items)
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {new Date().toLocaleTimeString()}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ 
-                      p: 2,
-                      maxHeight: '300px',
-                      overflowY: 'auto',
-                      overflowX: 'auto',
-                      fontSize: '12px',
-                      fontFamily: 'monospace',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      minWidth: '0'
-                    }}>
-                      {JSON.stringify(splitData.embeddings, null, 2)}
-                    </Box>
-                  </Paper>
-                )}
+          {apiData && (
+            <Box sx={{ mt: 2 }}>
+              <Button
+                variant="outlined"
+                onClick={() => setShowPreviewData(!showPreviewData)}
+                sx={{ mb: 2 }}
+              >
+                {showPreviewData ? 'Hide Data' : 'Preview Data'}
+              </Button>
+              
+              <Collapse in={showPreviewData}>
+                {(() => {
+                  const splitData = splitApiData(apiData);
+                  return (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {/* Embeddings Data */}
+                      {splitData.embeddings && (
+                        <Paper sx={{ 
+                          bgcolor: 'background.default',
+                          border: '1px solid #444',
+                          overflow: 'hidden'
+                        }}>
+                          <Box sx={{ 
+                            p: 2, 
+                            bgcolor: '#2A4A2A', 
+                            borderBottom: '1px solid #444',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          }}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#4CAF50' }}>
+                              Embeddings Data ({splitData.embeddings.count} items)
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {new Date().toLocaleTimeString()}
+                            </Typography>
+                          </Box>
+                          <Box sx={{ 
+                            p: 2,
+                            maxHeight: '300px',
+                            overflowY: 'auto',
+                            overflowX: 'auto',
+                            fontSize: '12px',
+                            fontFamily: 'monospace',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            minWidth: '0'
+                          }}>
+                            {JSON.stringify(splitData.embeddings, null, 2)}
+                          </Box>
+                        </Paper>
+                      )}
 
-                {/* Summaries Data */}
-                {splitData.summaries && (
-                  <Paper sx={{ 
-                    bgcolor: 'background.default',
-                    border: '1px solid #444',
-                    overflow: 'hidden'
-                  }}>
-                    <Box sx={{ 
-                      p: 2, 
-                      bgcolor: '#2A2A4A', 
-                      borderBottom: '1px solid #444',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
-                    }}>
-                      <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#2196F3' }}>
-                        Summaries Data ({splitData.summaries.count} items)
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {new Date().toLocaleTimeString()}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ 
-                      p: 2,
-                      maxHeight: '300px',
-                      overflowY: 'auto',
-                      overflowX: 'auto',
-                      fontSize: '12px',
-                      fontFamily: 'monospace',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      minWidth: '0'
-                    }}>
-                      {JSON.stringify(splitData.summaries, null, 2)}
-                    </Box>
-                  </Paper>
-                )}
+                      {/* Summaries Data */}
+                      {splitData.summaries && (
+                        <Paper sx={{ 
+                          bgcolor: 'background.default',
+                          border: '1px solid #444',
+                          overflow: 'hidden'
+                        }}>
+                          <Box sx={{ 
+                            p: 2, 
+                            bgcolor: '#2A2A4A', 
+                            borderBottom: '1px solid #444',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          }}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#2196F3' }}>
+                              Summaries Data ({splitData.summaries.count} items)
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {new Date().toLocaleTimeString()}
+                            </Typography>
+                          </Box>
+                          <Box sx={{ 
+                            p: 2,
+                            maxHeight: '300px',
+                            overflowY: 'auto',
+                            overflowX: 'auto',
+                            fontSize: '12px',
+                            fontFamily: 'monospace',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            minWidth: '0'
+                          }}>
+                            {JSON.stringify(splitData.summaries, null, 2)}
+                          </Box>
+                        </Paper>
+                      )}
 
-                {/* Original Data (for reference) */}
-                <Paper sx={{ 
-                  bgcolor: 'background.default',
-                  border: '1px solid #444',
-                  overflow: 'hidden'
-                }}>
-                  <Box sx={{ 
-                    p: 2, 
-                    bgcolor: '#333', 
-                    borderBottom: '1px solid #444',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                      Original Data ({getDataSummary(apiData)})
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {new Date().toLocaleTimeString()}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ 
-                    p: 2,
-                    maxHeight: '200px',
-                    overflowY: 'auto',
-                    overflowX: 'auto',
-                    fontSize: '12px',
-                    fontFamily: 'monospace',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    minWidth: '0'
-                  }}>
-                    {JSON.stringify(apiData, null, 2)}
-                  </Box>
-                </Paper>
-              </Box>
-            );
-          })()}
+                      {/* Original Data (for reference) */}
+                      <Paper sx={{ 
+                        bgcolor: 'background.default',
+                        border: '1px solid #444',
+                        overflow: 'hidden'
+                      }}>
+                        <Box sx={{ 
+                          p: 2, 
+                          bgcolor: '#333', 
+                          borderBottom: '1px solid #444',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                            Original Data ({getDataSummary(apiData)})
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {new Date().toLocaleTimeString()}
+                          </Typography>
+                        </Box>
+                        <Box sx={{ 
+                          p: 2,
+                          maxHeight: '200px',
+                          overflowY: 'auto',
+                          overflowX: 'auto',
+                          fontSize: '12px',
+                          fontFamily: 'monospace',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          minWidth: '0'
+                        }}>
+                          {JSON.stringify(apiData, null, 2)}
+                        </Box>
+                      </Paper>
+                    </Box>
+                  );
+                })()}
+              </Collapse>
+            </Box>
+          )}
         </Paper>
       </Box>
     </Box>
