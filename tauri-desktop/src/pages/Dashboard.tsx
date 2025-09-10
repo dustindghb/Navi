@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 
 interface PersonaData {
@@ -32,6 +32,7 @@ interface ApiData {
     key: string;
     data: CommentBoard;
   }>;
+  _saved_at?: string;
 }
 
 export function Dashboard() {
@@ -47,6 +48,34 @@ export function Dashboard() {
   // Load persona and API data on component mount
   useEffect(() => {
     loadData();
+  }, []);
+
+  // Listen for localStorage changes to automatically refresh data
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'navi-regulations-data' || e.key === 'navi-persona-data') {
+        addLog(`Storage change detected for key: ${e.key}`);
+        loadData();
+      }
+    };
+
+    // Listen for storage events (from other tabs/windows)
+    window.addEventListener('storage', handleStorageChange);
+
+    // Also listen for custom events (from same tab)
+    const handleCustomStorageChange = (e: CustomEvent) => {
+      if (e.detail.key === 'navi-regulations-data' || e.detail.key === 'navi-persona-data') {
+        addLog(`Custom storage change detected for key: ${e.detail.key}`);
+        loadData();
+      }
+    };
+
+    window.addEventListener('storageChange', handleCustomStorageChange as EventListener);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('storageChange', handleCustomStorageChange as EventListener);
+    };
   }, []);
 
   // Analyze relevance when both persona and API data are available
@@ -88,6 +117,7 @@ export function Dashboard() {
         setApiData(parsedApiData);
         addLog(`Loaded API data with count: ${parsedApiData.count}`);
         addLog(`API data items length: ${parsedApiData.items ? parsedApiData.items.length : 'No items'}`);
+        addLog(`API data saved at: ${parsedApiData._saved_at || 'Unknown time'}`);
         if (parsedApiData.items && parsedApiData.items.length > 0) {
           addLog(`First API item: ${parsedApiData.items[0].data.title} (${parsedApiData.items[0].data.agencyId})`);
         }
@@ -116,6 +146,12 @@ export function Dashboard() {
       console.error('Full error object:', err);
     }
     addLog('=== LOADING DATA END ===');
+  };
+
+  const refreshData = () => {
+    addLog('=== REFRESHING DATA ===');
+    loadData();
+    addLog('Data refresh completed');
   };
 
   const saveRelevantBoards = (boards: CommentBoard[], analysisTime: string) => {
@@ -441,6 +477,11 @@ Only include boards with relevance score >= 6. Be selective and focus on the mos
               }} />
               <span style={{ fontSize: '14px', color: '#B8B8B8' }}>
                 API Data: {apiData ? `${apiData.count} items` : 'Not loaded'}
+                {apiData && apiData._saved_at && (
+                  <span style={{ color: '#666', marginLeft: 8 }}>
+                    (saved {new Date(apiData._saved_at).toLocaleString()})
+                  </span>
+                )}
               </span>
             </div>
             
@@ -473,6 +514,21 @@ Only include boards with relevance score >= 6. Be selective and focus on the mos
 
           {/* Action Buttons */}
           <div style={{ marginTop: 16, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <button
+              onClick={refreshData}
+              style={{
+                background: '#2A2A2A',
+                color: '#B8B8B8',
+                border: '1px solid #444',
+                borderRadius: 6,
+                padding: '8px 16px',
+                fontSize: '14px',
+                cursor: 'pointer'
+              }}
+            >
+              Refresh Data
+            </button>
+            
             <button
               onClick={analyzeRelevance}
               disabled={isAnalyzing || !persona || !apiData}
@@ -592,7 +648,7 @@ Only include boards with relevance score >= 6. Be selective and focus on the mos
             </h3>
             
             <div style={{ display: 'grid', gap: 16 }}>
-              {relevantBoards.map((board, index) => (
+              {relevantBoards.map((board) => (
                 <div key={board.documentId} style={{
                   background: '#1A1A1A',
                   border: '1px solid #333',

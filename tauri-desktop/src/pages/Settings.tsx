@@ -36,6 +36,7 @@ export function Settings() {
   const [isTestingConnectivity, setIsTestingConnectivity] = useState(false);
   const [ollamaTagsTest, setOllamaTagsTest] = useState<string | null>(null);
   const [isTestingOllamaTags, setIsTestingOllamaTags] = useState(false);
+  const [isClearingData, setIsClearingData] = useState(false);
 
   // Load saved data on component mount and auto-fetch API data
   useEffect(() => {
@@ -247,6 +248,24 @@ export function Settings() {
       setLastFetchTime(new Date().toISOString());
       console.log('API data set successfully');
       
+      // Automatically save the data locally after successful fetch
+      const timestamp = new Date().toISOString();
+      const dataToSave = {
+        ...data,
+        _saved_at: timestamp
+      };
+
+      localStorage.setItem('navi-regulations-data', JSON.stringify(dataToSave));
+      localStorage.setItem('navi-last-fetch', timestamp);
+      
+      setSavedData(dataToSave);
+      console.log('API data automatically saved locally:', dataToSave);
+      
+      // Dispatch custom event to notify other components
+      window.dispatchEvent(new CustomEvent('storageChange', {
+        detail: { key: 'navi-regulations-data', value: dataToSave }
+      }));
+      
     } catch (err) {
       console.error('=== API FETCH ERROR ===');
       console.error('Error type:', typeof err);
@@ -304,6 +323,11 @@ export function Settings() {
       
       console.log('Data saved locally:', dataToSave);
       
+      // Dispatch custom event to notify other components
+      window.dispatchEvent(new CustomEvent('storageChange', {
+        detail: { key: 'navi-regulations-data', value: dataToSave }
+      }));
+      
       // Clear any existing errors
       setApiError(null);
     } catch (err) {
@@ -312,15 +336,28 @@ export function Settings() {
     }
   };
 
-  const clearSavedData = () => {
+  const clearSavedData = async () => {
+    setIsClearingData(true);
     try {
       localStorage.removeItem('navi-regulations-data');
       localStorage.removeItem('navi-last-fetch');
       setSavedData(null);
       setLastFetchTime(null);
       console.log('Cleared saved data');
+      
+      // Dispatch custom event to notify other components that data was cleared
+      window.dispatchEvent(new CustomEvent('storageChange', {
+        detail: { key: 'navi-regulations-data', value: null }
+      }));
+      
+      // Automatically fetch fresh API data after clearing
+      console.log('Auto-fetching fresh API data after clearing...');
+      await fetchApiData();
+      
     } catch (err) {
       console.error('Error clearing data:', err);
+    } finally {
+      setIsClearingData(false);
     }
   };
 
@@ -638,8 +675,9 @@ export function Settings() {
                 color="error"
                 startIcon={<DeleteIcon />}
                 onClick={clearSavedData}
+                disabled={isClearingData || isFetchingApi}
               >
-                Clear Saved Data
+                {isClearingData ? 'Clearing & Refreshing...' : 'Clear Saved Data'}
               </Button>
             )}
           </Box>
@@ -651,6 +689,14 @@ export function Settings() {
             >
               <Typography variant="body2">
                 {connectivityTest}
+              </Typography>
+            </Alert>
+          )}
+
+          {isClearingData && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Typography variant="body2">
+                🔄 Clearing saved data and fetching fresh API data...
               </Typography>
             </Alert>
           )}
