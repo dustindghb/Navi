@@ -1,0 +1,985 @@
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { request } from 'undici';
+import { spawn, exec } from 'node:child_process';
+import path from 'node:path';
+import fs from 'node:fs';
+
+// Hardcoded remote Ollama host for this app
+const REMOTE_OLLAMA_HOST = '10.0.4.52:11434';
+
+const DEFAULT_OLLAMA_HOST = '127.0.0.1';
+const DEFAULT_OLLAMA_PORT = 11434;
+
+function parseEnvBase() {
+  const envHost = process.env.OLLAMA_HOST; 
+  if (!envHost) return null;
+  try {
+    const url = new URL(envHost.startsWith('http') ? envHost : `http://${envHost}`);
+    return { host: url.hostname, port: Number(url.port || DEFAULT_OLLAMA_PORT) };
+  } catch {
+    return null;
+  }
+}
+
+function toBaseURL(host, port) {
+  const h = (host || DEFAULT_OLLAMA_HOST).replace(/^https?:\/\//, '');
+  const p = Number(port || DEFAULT_OLLAMA_PORT);
+  return `http://${h}:${p}`;
+}
+
+
+/**
+ * Create the main application window.
+ */
+function createWindow() {
+  const isDev = process.env.NODE_ENV === 'development';
+  const win = new BrowserWindow({
+    width: 900,
+    height: 700,
+    webPreferences: {
+      preload: path.join(app.getAppPath(), 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      webSecurity: !isDev, // Allow external network requests in development only
+      allowRunningInsecureContent: isDev, // Allow insecure content in development
+    },
+  });
+
+  const devUrl = process.env.RENDERER_DEV_URL;
+  if (devUrl) {
+    win.loadURL(devUrl).catch(() => {
+      // Fallback to built file if dev server not available
+      const built = path.join(app.getAppPath(), 'renderer', 'dist', 'index.html');
+      if (fs.existsSync(built)) {
+        win.loadFile(built);
+      } else {
+        win.loadFile(path.join(app.getAppPath(), 'renderer.html'));
+      }
+    });
+  } else {
+    const built = path.join(app.getAppPath(), 'renderer', 'dist', 'index.html');
+    if (fs.existsSync(built)) {
+      win.loadFile(built);
+    } else {
+      win.loadFile(path.join(app.getAppPath(), 'renderer.html'));
+    }
+  }
+}
+
+app.whenReady().then(() => {
+  createWindow();
+  // Start automatic API data fetching and persistence
+  try {
+    startApiDataAutoFetch();
+  } catch {}
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+
+// --------------------- Ollama helpers ---------------------
+
+function execCommand(cmd) {
+  return new Promise((resolve) => {
+    exec(cmd, (error, stdout, stderr) => {
+      resolve({ error, stdout, stderr });
+    });
+  });
+}
+
+function execCommandWithEnv(cmd, extraEnv = {}) {
+  return new Promise((resolve) => {
+    exec(cmd, { env: { ...process.env, ...extraEnv }, shell: '/bin/zsh' }, (error, stdout, stderr) => {
+      resolve({ error, stdout, stderr });
+    });
+  });
+}
+
+async function checkOllamaCLI() {
+  // Try version first; fall back to which for better diagnostics
+  const version = await execCommand('ollama --version');
+  if (!version.error && version.stdout) {
+    return { installed: true, version: version.stdout.trim() };
+  }
+  const which = await execCommand('which ollama');
+  if (!which.error && which.stdout) {
+    return { installed: true, version: 'unknown' };
+  }
+  return { installed: false, version: null, error: version.stderr || which.stderr };
+}
+
+async function isServerRunning(baseURL) {
+  try {
+    // Use curl command directly - same as Mac terminal
+    const curlResult = await execCommand(`curl -s --connect-timeout 10 --max-time 15 ${baseURL}/api/tags`);
+    
+    if (!curlResult.error && curlResult.stdout.includes('models')) {
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.log(`Server check failed for ${baseURL}:`, e.message);
+    return false;
+  }
+}
+
+function startOllamaServeDetached() {
+  try {
+    const child = spawn('ollama', ['serve'], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function waitForServer(baseURL, timeoutMs = 10000, intervalMs = 300) {
+  const start = Date.now();
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (await isServerRunning(baseURL)) return true;
+    if (Date.now() - start > timeoutMs) return false;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
+async function checkModelPresent(baseURL, modelName) {
+  try {
+    const res = await fetch(`${baseURL}/api/show`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: modelName }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return { present: true, details: data };
+    }
+    // Fallback: scan tags list
+    const tags = await fetch(`${baseURL}/api/tags`).then(r => r.ok ? r.json() : { models: [] }).catch(() => ({ models: [] }));
+    if (Array.isArray(tags.models)) {
+      const found = tags.models.find(m => m.name === modelName);
+      if (found) return { present: true, details: found };
+    }
+    // Final fallback: CLI list
+    const cli = await listModelsViaCLI(baseURL);
+    if (cli.models?.includes(modelName)) return { present: true, details: { name: modelName } };
+    let details = null;
+    try { details = await res.json(); } catch {}
+    return { present: false, details };
+  } catch (e) {
+    return { present: false, error: String(e) };
+  }
+}
+
+async function testGenerate(baseURL, modelName) {
+  // Add a timeout so we don't hang during cold-start model load
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90000);
+  try {
+    const res = await fetch(`${baseURL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelName,
+        prompt: 'Respond with a single short sentence: Hello from Ollama.',
+        stream: false,
+        options: { temperature: 0.1, num_predict: 1 },
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      return { ok: false, error: `HTTP ${res.status}` };
+    }
+    const data = await res.json();
+    const output = data.response || '';
+    return { ok: true, output };
+  } catch (e) {
+    const message = String(e);
+    const timedOut = message.includes('AbortError') || message.includes('The operation was aborted');
+    return { ok: false, error: message, timedOut };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function callOllamaChat(baseURL, payload, { timeoutMs = 180000 } = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${baseURL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status}` };
+    const data = await res.json();
+    return { ok: true, data };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function listModelsViaCLI(baseURL) {
+  const env = { OLLAMA_HOST: baseURL };
+  const jsonAttempt = await execCommandWithEnv('ollama list --json', env);
+  if (!jsonAttempt.error && jsonAttempt.stdout) {
+    try {
+      const parsed = JSON.parse(jsonAttempt.stdout);
+      if (Array.isArray(parsed)) {
+        return { models: parsed.map(m => m.name).filter(Boolean) };
+      }
+    } catch {}
+  }
+  const textAttempt = await execCommandWithEnv('ollama list', env);
+  const models = [];
+  if (!textAttempt.error && textAttempt.stdout) {
+    const lines = textAttempt.stdout.split('\n').map(s => s.trim()).filter(Boolean);
+    for (const line of lines) {
+      if (/^NAME\s+ID\s+SIZE\s+MODIFIED/i.test(line)) continue;
+      const cols = line.split(/\s+/);
+      if (cols.length >= 1) models.push(cols[0]);
+    }
+  }
+  return { models };
+}
+
+// --------------------- IPC handlers ---------------------
+
+ipcMain.handle('ollama:runChecks', async (_event, args) => {
+  const { modelName, allowAutoStart, host, port } = args || {};
+  const logs = [];
+  // Determine base URL precedence: explicit host/port → env → 11434 → 11435
+  let baseCandidate = host || port ? toBaseURL(host, port) : null;
+  if (!baseCandidate) {
+    const envBase = parseEnvBase();
+    if (envBase) baseCandidate = toBaseURL(envBase.host, envBase.port);
+  }
+  if (!baseCandidate) baseCandidate = toBaseURL(DEFAULT_OLLAMA_HOST, DEFAULT_OLLAMA_PORT);
+
+  let baseURL = baseCandidate;
+
+  const cli = await checkOllamaCLI();
+  logs.push({ step: 'cli', result: cli });
+
+  let serverUp = await isServerRunning(baseURL);
+  logs.push({ step: 'server:initial', result: serverUp, baseURL });
+  if (!serverUp && !host && !port) {
+    // Try common alternate port 11435
+    const altBase = toBaseURL(DEFAULT_OLLAMA_HOST, 11435);
+    const altUp = await isServerRunning(altBase);
+    logs.push({ step: 'server:altProbe', baseURL: altBase, result: altUp });
+    if (altUp) {
+      baseURL = altBase;
+      serverUp = true;
+      logs.push({ step: 'server:selectedAlt', baseURL });
+    } else {
+      // Try detect via lsof
+      try {
+        const lsof = await execCommand("lsof -iTCP -sTCP:LISTEN -nP | grep ollama");
+        logs.push({ step: 'server:lsofRaw', output: lsof.stdout || lsof.stderr });
+        if (!lsof.error && lsof.stdout) {
+          const lines = lsof.stdout.split('\n').filter(Boolean);
+          for (const line of lines) {
+            const m = line.match(/\b(\d+\.\d+\.\d+\.\d+|\[::1\]|::1|127\.0\.0\.1|0\.0\.0\.0):(\d+)\b/);
+            if (m) {
+              const hostM = m[1].replace(/\[|\]/g, '') || '127.0.0.1';
+              const portM = Number(m[2]);
+              const detBase = toBaseURL(hostM, portM);
+              const detUp = await isServerRunning(detBase);
+              logs.push({ step: 'server:lsofProbe', baseURL: detBase, result: detUp });
+              if (detUp) {
+                baseURL = detBase;
+                serverUp = true;
+                logs.push({ step: 'server:selectedLsof', baseURL });
+                break;
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+
+  if (!serverUp && allowAutoStart && cli.installed) {
+    const started = startOllamaServeDetached();
+    logs.push({ step: 'server:startAttempt', result: started });
+    if (started) {
+      const ready = await waitForServer(baseURL);
+      serverUp = ready;
+      logs.push({ step: 'server:waitReady', result: ready });
+    }
+  }
+
+  let model = { present: false };
+  let gen = { ok: false };
+
+  if (serverUp && modelName) {
+    model = await checkModelPresent(baseURL, modelName);
+    logs.push({ step: 'model:present', result: model });
+    if (model.present) {
+      gen = await testGenerate(baseURL, modelName);
+      logs.push({ step: 'generate:test', result: gen });
+    }
+  }
+
+  return {
+    cliInstalled: cli.installed,
+    cliVersion: cli.version || null,
+    serverRunning: serverUp,
+    modelPresent: model.present,
+    testGenerationOk: gen.ok,
+    testOutput: gen.output || null,
+    testError: gen.error || null,
+    testTimedOut: !!gen.timedOut,
+    baseURL,
+    logs,
+  };
+});
+
+ipcMain.handle('ollama:getDefaults', async () => {
+  const env = parseEnvBase();
+  return {
+    host: env?.host || DEFAULT_OLLAMA_HOST,
+    port: env?.port || DEFAULT_OLLAMA_PORT,
+  };
+});
+
+ipcMain.handle('ollama:detect', async () => {
+  const logs = [];
+  const env = parseEnvBase();
+  if (env) logs.push({ step: 'envBase', env });
+  // Prefer env if present
+  if (env) {
+    const envBase = toBaseURL(env.host, env.port);
+    const envUp = await isServerRunning(envBase);
+    logs.push({ step: 'probeEnv', baseURL: envBase, up: envUp });
+    if (envUp) return { host: env.host, port: env.port, logs };
+  }
+  // probe defaults next
+  const defBase = toBaseURL(DEFAULT_OLLAMA_HOST, DEFAULT_OLLAMA_PORT);
+  const defUp = await isServerRunning(defBase);
+  logs.push({ step: 'probeDefault', baseURL: defBase, up: defUp });
+  if (defUp) return { host: DEFAULT_OLLAMA_HOST, port: DEFAULT_OLLAMA_PORT, logs };
+  // probe 11435
+  const altBase = toBaseURL(DEFAULT_OLLAMA_HOST, 11435);
+  const altUp = await isServerRunning(altBase);
+  logs.push({ step: 'probeAlt', baseURL: altBase, up: altUp });
+  if (altUp) return { host: DEFAULT_OLLAMA_HOST, port: 11435, logs };
+  // lsof
+  try {
+    const lsof = await execCommand("lsof -iTCP -sTCP:LISTEN -nP | grep ollama");
+    logs.push({ step: 'lsofRaw', output: lsof.stdout || lsof.stderr });
+    if (!lsof.error && lsof.stdout) {
+      const lines = lsof.stdout.split('\n').filter(Boolean);
+      for (const line of lines) {
+        const m = line.match(/\b(\d+\.\d+\.\d+\.\d+|\[::1\]|::1|127\.0\.0\.1|0\.0\.0\.0):(\d+)\b/);
+        if (m) {
+          const hostM = m[1].replace(/\[|\]/g, '') || '127.0.0.1';
+          const portM = Number(m[2]);
+          const detBase = toBaseURL(hostM, portM);
+          const detUp = await isServerRunning(detBase);
+          logs.push({ step: 'lsofProbe', baseURL: detBase, up: detUp });
+          if (detUp) return { host: hostM, port: portM, logs };
+        }
+      }
+    }
+  } catch {}
+  // fallback to env
+  if (env) return { host: env.host, port: env.port, logs };
+  return { host: DEFAULT_OLLAMA_HOST, port: DEFAULT_OLLAMA_PORT, logs };
+});
+
+ipcMain.handle('ollama:promptStart', async () => {
+  const response = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['Start Ollama Serve', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'Start Ollama',
+    message: 'Ollama server is not running. Do you want to start it now?'
+  });
+  if (response.response === 0) {
+    const started = startOllamaServeDetached();
+    if (!started) return { started: false };
+    const ready = await waitForServer(toBaseURL());
+    return { started: ready };
+  }
+  return { started: false };
+});
+
+// --------------------- Generic Chat IPC ---------------------
+
+ipcMain.handle('chat:send', async (_event, args) => {
+  const { model = 'gpt-oss:20b', messages = [], options = {}, stream = false, keep_alive = -1 } = args || {};
+  try {
+    // Use hardcoded remote host
+    const baseUrl = `http://${REMOTE_OLLAMA_HOST}`;
+    
+    console.log('Chat request - Using baseUrl:', baseUrl);
+    
+    // Use the chat API for better conversation handling
+    const messagesJson = JSON.stringify(messages.map(msg => ({
+      role: msg.role,
+      content: msg.content
+    })));
+    
+    // Use curl to call the remote Ollama chat API
+    const curlCommand = `curl -X POST ${baseUrl}/api/chat \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "${model}",
+    "messages": ${messagesJson},
+    "stream": false
+  }'`;
+    
+    console.log('Executing curl command:', curlCommand);
+    const result = await execCommand(curlCommand);
+    console.log('Curl result:', { error: result.error, stdout: result.stdout, stderr: result.stderr });
+    
+    if (result.error) {
+      return { ok: false, error: `Curl error: ${result.stderr}` };
+    }
+    
+    // Parse the JSON response
+    try {
+      const responseData = JSON.parse(result.stdout);
+      if (responseData.message && responseData.message.content) {
+        return { ok: true, response: responseData.message.content.trim(), raw: responseData };
+      } else {
+        return { ok: false, error: 'No response from model', raw: responseData };
+      }
+    } catch (parseError) {
+      return { ok: false, error: `Failed to parse response: ${parseError.message}`, raw: result.stdout };
+    }
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// --------------------- Ollama Generation Handler ---------------------
+
+ipcMain.handle('ollama:generate', async (_event, { model, prompt, options = {} }) => {
+  try {
+    // Use hardcoded remote host
+    const baseUrl = `http://${REMOTE_OLLAMA_HOST}`;
+    
+    // Use curl to call the remote Ollama API directly
+    const curlCommand = `curl -X POST ${baseUrl}/api/generate \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "${model}",
+    "prompt": "${prompt.replace(/"/g, '\\"')}",
+    "stream": false
+  }'`;
+    
+    const result = await execCommand(curlCommand);
+    
+    if (result.error) {
+      throw new Error(`Curl error: ${result.stderr}`);
+    }
+    
+    // Parse the JSON response
+    try {
+      const responseData = JSON.parse(result.stdout);
+      if (responseData.response) {
+        return { success: true, response: responseData.response.trim() };
+      } else {
+        throw new Error('No response from model');
+      }
+    } catch (parseError) {
+      throw new Error(`Failed to parse response: ${parseError.message}`);
+    }
+  } catch (error) {
+    console.error('Ollama generation error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// --------------------- Persona persistence ---------------------
+
+function getPersonaPath() {
+  const dir = app.getPath('userData');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {}
+  return path.join(dir, 'persona.json');
+}
+
+ipcMain.handle('persona:load', async () => {
+  try {
+    const file = getPersonaPath();
+    if (!fs.existsSync(file)) return { exists: false, persona: null };
+    const raw = fs.readFileSync(file, 'utf8');
+    const persona = JSON.parse(raw);
+    return { exists: true, persona };
+  } catch (e) {
+    return { exists: false, error: String(e) };
+  }
+});
+
+ipcMain.handle('persona:save', async (_event, persona) => {
+  try {
+    const file = getPersonaPath();
+    fs.writeFileSync(file, JSON.stringify(persona || {}, null, 2), 'utf8');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// --------------------- Public API fetch ---------------------
+
+ipcMain.handle('api:fetchJSON', async (_event, args) => {
+  const { url } = args || {};
+  if (!url || typeof url !== 'string') {
+    return { ok: false, error: 'Missing URL' };
+  }
+  try {
+    const opts = {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json, text/plain;q=0.8, */*;q=0.5',
+        'User-Agent': 'NaviApp/0.1 (+electron)'
+      }
+    };
+    let { statusCode, body } = await request(url, opts);
+    // If API Gateway path quirk returns 404, retry with a trailing slash before query string
+    if (statusCode === 404 && url.includes('?') && !/\/_?\?/.test(url)) {
+      const [base, query] = url.split('?');
+      const altUrl = base.endsWith('/') ? url : `${base}/${query ? `?${query}` : ''}`;
+      try {
+        const alt = await request(altUrl, opts);
+        statusCode = alt.statusCode;
+        body = alt.body;
+      } catch {}
+    }
+    const text = await body.text();
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch {}
+    const ok = statusCode >= 200 && statusCode < 300;
+    return { ok, status: statusCode, data: parsed, raw: parsed ? undefined : text };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+
+// --------------------- API Data auto-fetch & persistence ---------------------
+
+const API_DATA_DEFAULT_URL = 'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/data?all=true';
+const API_DATA_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+let apiDataInterval = null;
+let apiDataIntervalMs = API_DATA_INTERVAL_MS;
+let apiDataUrl = API_DATA_DEFAULT_URL;
+let lastApiDataPayload = null;
+
+function getApiDataPath() {
+  const dir = app.getPath('userData');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return path.join(dir, 'api-data.json');
+}
+
+function readApiDataFromDisk() {
+  try {
+    const file = getApiDataPath();
+    if (!fs.existsSync(file)) return null;
+    const raw = fs.readFileSync(file, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function broadcastApiDataUpdate(payload) {
+  try {
+    for (const bw of BrowserWindow.getAllWindows()) {
+      try { bw.webContents.send('apiData:update', payload); } catch {}
+    }
+  } catch {}
+}
+
+async function fetchAndPersistApiData(url) {
+  const startedAt = new Date().toISOString();
+  try {
+    const opts = {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json, text/plain;q=0.8, */*;q=0.5',
+        'User-Agent': 'NaviApp/0.1 (+electron)'
+      }
+    };
+    let { statusCode, body } = await request(url, opts);
+    // Retry once with trailing slash before query if 404
+    if (statusCode === 404 && url.includes('?') && !/\/_?\?/.test(url)) {
+      const [base, query] = url.split('?');
+      const altUrl = base.endsWith('/') ? url : `${base}/${query ? `?${query}` : ''}`;
+      try {
+        const alt = await request(altUrl, opts);
+        statusCode = alt.statusCode;
+        body = alt.body;
+      } catch {}
+    }
+    const text = await body.text();
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch {}
+    const ok = statusCode >= 200 && statusCode < 300;
+    const payload = {
+      url,
+      fetchedAt: startedAt,
+      ok,
+      status: statusCode,
+      data: parsed || undefined,
+      raw: parsed ? undefined : text,
+    };
+    try { fs.writeFileSync(getApiDataPath(), JSON.stringify(payload, null, 2), 'utf8'); } catch {}
+    lastApiDataPayload = payload;
+    broadcastApiDataUpdate(payload);
+    return payload;
+  } catch (e) {
+    const payload = {
+      url,
+      fetchedAt: startedAt,
+      ok: false,
+      error: String(e),
+    };
+    try { fs.writeFileSync(getApiDataPath(), JSON.stringify(payload, null, 2), 'utf8'); } catch {}
+    lastApiDataPayload = payload;
+    broadcastApiDataUpdate(payload);
+    return payload;
+  }
+}
+
+function startApiDataAutoFetch(url = API_DATA_DEFAULT_URL, intervalMs = API_DATA_INTERVAL_MS) {
+  apiDataUrl = url;
+  apiDataIntervalMs = intervalMs;
+  if (apiDataInterval) {
+    try { clearInterval(apiDataInterval); } catch {}
+    apiDataInterval = null;
+  }
+  // Load any previously saved payload
+  try { lastApiDataPayload = readApiDataFromDisk(); } catch {}
+  // Do an immediate fetch, then schedule
+  fetchAndPersistApiData(apiDataUrl).catch(() => {});
+  try {
+    apiDataInterval = setInterval(() => {
+      fetchAndPersistApiData(apiDataUrl).catch(() => {});
+    }, apiDataIntervalMs);
+  } catch {}
+}
+
+ipcMain.handle('apiData:getLatest', async () => {
+  if (!lastApiDataPayload) {
+    try { lastApiDataPayload = readApiDataFromDisk(); } catch {}
+  }
+  return lastApiDataPayload || null;
+});
+
+ipcMain.handle('apiData:getStatus', async () => {
+  return {
+    url: apiDataUrl,
+    intervalMs: apiDataIntervalMs,
+    running: !!apiDataInterval,
+    hasData: !!lastApiDataPayload,
+    fetchedAt: lastApiDataPayload?.fetchedAt || null,
+  };
+});
+
+ipcMain.handle('apiData:clear', async () => {
+  try { fs.unlinkSync(getApiDataPath()); } catch {}
+  lastApiDataPayload = null;
+  broadcastApiDataUpdate(null);
+  return { ok: true };
+});
+
+// --------------------- Recommend relevant boards via local model ---------------------
+
+function getBoardsForPromptFromApiPayload(payload) {
+  if (!payload || !payload.data || !Array.isArray(payload.data.items)) return [];
+  const items = payload.data.items;
+  return items.map((it) => {
+    const d = it?.data || {};
+    const text = (d?.text && String(d.text).trim())
+      || (d?.message?.content && String(d.message.content).trim())
+      || (d?.highlightedContent && String(d.highlightedContent).trim())
+      || ([d?.title, d?.documentType, d?.subtype].filter(Boolean).join(' — ').trim());
+    return {
+      key: it?.key || d?.documentId || '',
+      agencyId: d?.agencyId || '',
+      text: text || '',
+    };
+  });
+}
+
+async function detectOllamaBaseURLForUse() {
+  // Use hardcoded host configuration
+  const env = parseEnvBase();
+  if (env) return toBaseURL(env.host, env.port);
+  return toBaseURL(DEFAULT_OLLAMA_HOST, DEFAULT_OLLAMA_PORT);
+}
+
+async function generateJsonWithModel(baseURL, modelName, prompt, { temperature = 0.1, num_predict = 64, num_ctx = 8192, timeoutMs = 150000, stream = false, onToken, system, enforceJson = true } = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${baseURL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelName,
+        prompt,
+        system: system || undefined,
+        stream: !!stream,
+        format: enforceJson ? 'json' : undefined,
+        options: { temperature, num_predict, num_ctx }
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    if (!stream) {
+      const data = await res.json();
+      let text = data?.response || '';
+      if (!enforceJson) {
+        return { ok: true, json: null, raw: text };
+      }
+      let parsed = null;
+      try { parsed = JSON.parse(text); } catch (e) {
+        const m = text.match(/\{[\s\S]*\}/);
+        if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+      }
+      if (!parsed) return { ok: false, error: 'Model did not return valid JSON', raw: text };
+      return { ok: true, json: parsed, raw: text };
+    }
+    // Streaming mode: accumulate tokens from NDJSON
+    const reader = res.body?.getReader?.();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let full = '';
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line) continue;
+        try {
+          const obj = JSON.parse(line);
+          if (typeof obj?.response === 'string' && obj.response) {
+            full += obj.response;
+            try { if (onToken) onToken(obj.response); } catch {}
+          }
+          if (obj?.done) {
+            // finalize
+          }
+        } catch {}
+      }
+    }
+    if (!enforceJson) {
+      return { ok: true, json: null, raw: full };
+    }
+    // Parse final text as JSON
+    let parsed = null;
+    try { parsed = JSON.parse(full); } catch (e) {
+      const m = full.match(/\{[\s\S]*\}/);
+      if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+    }
+    if (!parsed) return { ok: false, error: 'Model did not return valid JSON', raw: full };
+    return { ok: true, json: parsed, raw: full };
+  } catch (e) {
+    const message = String(e);
+    const timedOut = message.includes('AbortError') || message.includes('The operation was aborted');
+    return { ok: false, error: message, timedOut };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// --------------------- Generation settings persistence ---------------------
+
+function getGenSettingsPath() {
+  const dir = app.getPath('userData');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return path.join(dir, 'gen-settings.json');
+}
+
+function loadGenSettings() {
+  const defaults = { timeoutMs: 180000, num_predict: 24, num_ctx: 4096, temperature: 0.0, stream: false };
+  try {
+    const p = getGenSettingsPath();
+    if (!fs.existsSync(p)) return defaults;
+    const raw = fs.readFileSync(p, 'utf8');
+    const obj = JSON.parse(raw);
+    return { ...defaults, ...obj };
+  } catch {
+    return defaults;
+  }
+}
+
+function saveGenSettings(next) {
+  try {
+    const p = getGenSettingsPath();
+    fs.writeFileSync(p, JSON.stringify(next || {}, null, 2), 'utf8');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+ipcMain.handle('gen:getSettings', async () => loadGenSettings());
+ipcMain.handle('gen:saveSettings', async (_event, next) => saveGenSettings(next));
+
+
+
+function buildPerItemPrompt(personaSummary, board) {
+  const textSnippet = String(board.text || '').split(/\s+/).slice(0, 150).join(' ');
+  const compactBoard = { key: board.key, agencyId: board.agencyId, text: textSnippet };
+  const instruction = {
+    task: 'Decide if the public comment board is relevant to the persona based on the agency and the excerpt.',
+    output: 'Reply exactly as: "Yes — <brief reason>" or "No — <brief reason>" (<=10 words). No other text.'
+  };
+  return `Instruction:\n${JSON.stringify(instruction)}\n\nPersona:\n${JSON.stringify(personaSummary)}\n\nBoard:\n${JSON.stringify(compactBoard)}`;
+}
+
+ipcMain.handle('recommend:findRelevantBoards', async (event, args) => {
+  const { modelName = 'gpt-oss:20b', personaOverride = null, itemsOverride = null } = args || {};
+  try {
+    const genSettings = loadGenSettings();
+    // Persona
+    let persona = personaOverride;
+    if (!persona) {
+      try {
+        const file = getPersonaPath();
+        if (fs.existsSync(file)) {
+          persona = JSON.parse(fs.readFileSync(file, 'utf8'));
+        }
+      } catch {}
+    }
+    persona = persona || {};
+
+    // Items
+    let itemsPayload = itemsOverride;
+    if (!itemsPayload) {
+      if (!lastApiDataPayload) {
+        try { lastApiDataPayload = readApiDataFromDisk(); } catch {}
+      }
+      itemsPayload = lastApiDataPayload || null;
+    }
+    const promptItems = getBoardsForPromptFromApiPayload(itemsPayload);
+    const itemMap = new Map();
+    if (Array.isArray(itemsPayload?.data?.items)) {
+      for (const it of itemsPayload.data.items) {
+        const key = it?.key || it?.data?.documentId || '';
+        if (key) itemMap.set(key, it);
+      }
+    }
+
+    // Persona summary kept compact
+    const personaSummary = {
+      name: persona?.name || '',
+      role: persona?.role || '',
+      interests: Array.isArray(persona?.interests) ? persona.interests : [],
+    };
+
+    // Detect model server
+    const baseURL = await detectOllamaBaseURLForUse();
+    const serverUp = await isServerRunning(baseURL);
+    if (!serverUp) {
+      return { ok: false, error: 'Local model server is not running.' };
+    }
+
+    // Evaluate each item separately to avoid context truncation
+    const perItemResults = [];
+    const debug = [];
+    const systemPrompt = 'You are a concise classifier. Reply only with "Yes — <reason>" or "No — <reason>". No preamble, no JSON, no extra text.';
+    for (const board of promptItems) {
+      const prompt = buildPerItemPrompt(personaSummary, board);
+      try { event?.sender?.send('recommend:progress', { phase: 'start', key: board.key, prompt }); } catch {}
+      let gen = await generateJsonWithModel(baseURL, modelName, prompt, {
+        temperature: 0.0,
+        num_predict: Math.max(32, Math.min(96, (genSettings.num_predict || 48))),
+        num_ctx: Math.min(4096, genSettings.num_ctx || 4096),
+        timeoutMs: Math.min(180000, genSettings.timeoutMs || 180000),
+        stream: false,
+        system: systemPrompt,
+        enforceJson: false,
+        onToken: (tok) => {
+          try { event?.sender?.send('recommend:progress', { phase: 'token', key: board.key, token: tok }); } catch {}
+        }
+      });
+      if (!gen.ok) {
+        // Retry once with shorter output and longer timeout
+        gen = await generateJsonWithModel(baseURL, modelName, prompt, {
+          temperature: 0.0,
+          num_predict: 48,
+          num_ctx: Math.min(4096, genSettings.num_ctx || 4096),
+          timeoutMs: 180000,
+          stream: false,
+          system: systemPrompt,
+          enforceJson: false,
+          onToken: (tok) => {
+            try { event?.sender?.send('recommend:progress', { phase: 'token', key: board.key, token: tok }); } catch {}
+          }
+        });
+        if (!gen.ok) {
+          perItemResults.push({ key: board.key, score: 0, reason: `error: ${gen.error || 'gen failed'}`, relevant: false });
+          debug.push({ key: board.key, prompt, response: gen.raw || '', error: gen.error || 'gen failed' });
+          try { event?.sender?.send('recommend:progress', { phase: 'error', key: board.key, error: gen.error || 'gen failed', response: gen.raw || '' }); } catch {}
+          continue;
+        }
+      }
+      // Derive relevance from raw text: expect "Yes — <reason>" or "No — <reason>"
+      const raw = gen.raw || '';
+      const firstLine = String(raw).trim().split(/\r?\n/)[0] || '';
+      let relevant = false;
+      let reason = '';
+      const m = firstLine.match(/^(yes|no)\b[\s:–—-]*([^]*)$/i);
+      if (m) {
+        relevant = /^yes$/i.test(m[1]);
+        reason = (m[2] || '').trim();
+      } else {
+        const lower = firstLine.toLowerCase();
+        if (lower.includes('not relevant')) relevant = false; else if (lower.includes('relevant')) relevant = true;
+        reason = firstLine.slice(0, 120).trim();
+      }
+      const key = board.key;
+      const score = relevant ? 1 : 0;
+      perItemResults.push({ key, relevant, score, reason });
+      debug.push({ key, prompt, response: raw, mode: 'text' });
+      try { event?.sender?.send('recommend:progress', { phase: 'response', key, response: raw }); } catch {}
+    }
+
+    // Rehydrate full items and filter relevant
+    const enriched = perItemResults
+      .filter((r) => r.relevant)
+      .map((r) => {
+        const item = r.key ? itemMap.get(r.key) : null;
+        const full = item?.data ? item.data : null;
+        return full ? { key: r.key, score: r.score, reason: r.reason, item: full } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.score - a.score));
+
+    return { ok: true, relevant: enriched, baseURL, modelName, debug };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+

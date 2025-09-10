@@ -464,6 +464,44 @@ export function Settings() {
     return `${typeof data} data`;
   };
 
+  const splitApiData = (data: any) => {
+    if (!data || !data.items || !Array.isArray(data.items)) {
+      return { embeddings: null, summaries: null };
+    }
+
+    const embeddings: any[] = [];
+    const summaries: any[] = [];
+
+    data.items.forEach((item: any) => {
+      if (item.data) {
+        // Create embedding object with embedding, documentId, and title
+        const embeddingObj = {
+          documentId: item.data.documentId,
+          title: item.data.title,
+          embedding: item.data.embedding || null
+        };
+        embeddings.push(embeddingObj);
+
+        // Create summary object with all attributes except embedding
+        const { embedding, ...summaryData } = item.data;
+        summaries.push(summaryData);
+      }
+    });
+
+    return {
+      embeddings: {
+        count: embeddings.length,
+        items: embeddings,
+        _saved_at: data._saved_at
+      },
+      summaries: {
+        count: summaries.length,
+        items: summaries,
+        _saved_at: data._saved_at
+      }
+    };
+  };
+
   return (
     <Box sx={{ 
       height: '100vh', 
@@ -712,42 +750,124 @@ export function Settings() {
             </Alert>
           )}
 
-          {apiData && (
-            <Paper sx={{ 
-              bgcolor: 'background.default',
-              border: '1px solid #444',
-              overflow: 'hidden'
-            }}>
-              <Box sx={{ 
-                p: 2, 
-                bgcolor: '#333', 
-                borderBottom: '1px solid #444',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
-              }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                  Fetched Data ({getDataSummary(apiData)})
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {new Date().toLocaleTimeString()}
-                </Typography>
+          {apiData && (() => {
+            const splitData = splitApiData(apiData);
+            return (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {/* Embeddings Data */}
+                {splitData.embeddings && (
+                  <Paper sx={{ 
+                    bgcolor: 'background.default',
+                    border: '1px solid #444',
+                    overflow: 'hidden'
+                  }}>
+                    <Box sx={{ 
+                      p: 2, 
+                      bgcolor: '#2A4A2A', 
+                      borderBottom: '1px solid #444',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#4CAF50' }}>
+                        Embeddings Data ({splitData.embeddings.count} items)
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {new Date().toLocaleTimeString()}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ 
+                      p: 2,
+                      maxHeight: '300px',
+                      overflowY: 'auto',
+                      overflowX: 'auto',
+                      fontSize: '12px',
+                      fontFamily: 'monospace',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      minWidth: '0'
+                    }}>
+                      {JSON.stringify(splitData.embeddings, null, 2)}
+                    </Box>
+                  </Paper>
+                )}
+
+                {/* Summaries Data */}
+                {splitData.summaries && (
+                  <Paper sx={{ 
+                    bgcolor: 'background.default',
+                    border: '1px solid #444',
+                    overflow: 'hidden'
+                  }}>
+                    <Box sx={{ 
+                      p: 2, 
+                      bgcolor: '#2A2A4A', 
+                      borderBottom: '1px solid #444',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#2196F3' }}>
+                        Summaries Data ({splitData.summaries.count} items)
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {new Date().toLocaleTimeString()}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ 
+                      p: 2,
+                      maxHeight: '300px',
+                      overflowY: 'auto',
+                      overflowX: 'auto',
+                      fontSize: '12px',
+                      fontFamily: 'monospace',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      minWidth: '0'
+                    }}>
+                      {JSON.stringify(splitData.summaries, null, 2)}
+                    </Box>
+                  </Paper>
+                )}
+
+                {/* Original Data (for reference) */}
+                <Paper sx={{ 
+                  bgcolor: 'background.default',
+                  border: '1px solid #444',
+                  overflow: 'hidden'
+                }}>
+                  <Box sx={{ 
+                    p: 2, 
+                    bgcolor: '#333', 
+                    borderBottom: '1px solid #444',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                      Original Data ({getDataSummary(apiData)})
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {new Date().toLocaleTimeString()}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ 
+                    p: 2,
+                    maxHeight: '200px',
+                    overflowY: 'auto',
+                    overflowX: 'auto',
+                    fontSize: '12px',
+                    fontFamily: 'monospace',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    minWidth: '0'
+                  }}>
+                    {JSON.stringify(apiData, null, 2)}
+                  </Box>
+                </Paper>
               </Box>
-              <Box sx={{ 
-                p: 2,
-                maxHeight: '400px',
-                overflowY: 'auto',
-                overflowX: 'auto',
-                fontSize: '12px',
-                fontFamily: 'monospace',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                minWidth: '0'
-              }}>
-                {JSON.stringify(apiData, null, 2)}
-              </Box>
-            </Paper>
-          )}
+            );
+          })()}
         </Paper>
       </Box>
     </Box>
