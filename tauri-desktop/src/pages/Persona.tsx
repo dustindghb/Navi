@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 type PersonaData = {
   name?: string;
   role?: string;
   interests?: string[];
+  _saved_at?: string;
 };
 
 export function Persona() {
@@ -12,6 +13,40 @@ export function Persona() {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [interestsText, setInterestsText] = useState('');
+  const [lastSaved, setLastSaved] = useState<string | null>(null);
+
+  // Load saved persona data on component mount
+  useEffect(() => {
+    loadSavedPersona();
+  }, []);
+
+  const loadSavedPersona = () => {
+    try {
+      const saved = localStorage.getItem('navi-persona-data');
+      if (saved) {
+        const parsedData = JSON.parse(saved);
+        setPersona(parsedData);
+        setInterestsText(parsedData.interests ? parsedData.interests.join(', ') : '');
+        setLastSaved(parsedData._saved_at || null);
+        console.log('Loaded saved persona data:', parsedData);
+      }
+    } catch (err) {
+      console.error('Error loading saved persona data:', err);
+    }
+  };
+
+  const clearSavedPersona = () => {
+    try {
+      localStorage.removeItem('navi-persona-data');
+      setPersona({ role: '' });
+      setInterestsText('');
+      setLastSaved(null);
+      setIsDirty(false);
+      console.log('Cleared saved persona data');
+    } catch (err) {
+      console.error('Error clearing persona data:', err);
+    }
+  };
 
   async function save() {
     setErrorText(null);
@@ -21,14 +56,26 @@ export function Persona() {
         .split(/[,\n]/)
         .map(s => s.trim())
         .filter(Boolean);
-      const toSave = { ...persona, interests: derivedInterests };
       
-      // Simulate save operation (no actual functionality)
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const timestamp = new Date().toISOString();
+      const toSave = { 
+        ...persona, 
+        interests: derivedInterests,
+        _saved_at: timestamp
+      };
+      
+      // Save to localStorage
+      localStorage.setItem('navi-persona-data', JSON.stringify(toSave));
+      
+      // Simulate save operation for UI feedback
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       setIsDirty(false);
       setPersona(toSave);
+      setLastSaved(timestamp);
+      console.log('Persona data saved successfully:', toSave);
     } catch (e: any) {
+      console.error('Error saving persona data:', e);
       setErrorText(String(e?.message || e));
     } finally {
       setSaving(false);
@@ -83,10 +130,26 @@ export function Persona() {
           {errorText && (
             <div style={{ color: '#FF6B6B', fontSize: 12, marginTop: 8 }}>{errorText}</div>
           )}
-          <div style={{ marginTop: 16 }}>
+          
+          {lastSaved && (
+            <div style={{ color: '#4CAF50', fontSize: 12, marginTop: 8 }}>
+              ✓ Last saved: {new Date(lastSaved).toLocaleString()}
+            </div>
+          )}
+          
+          <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
             <button style={primaryBtn} onClick={save} disabled={saving || !isDirty}>
               {saving ? 'Saving…' : (isDirty ? 'Save Persona' : 'Saved')}
             </button>
+            
+            {lastSaved && (
+              <button 
+                style={{ ...primaryBtn, background: '#6B2C2C', color: '#FAFAFA' }} 
+                onClick={clearSavedPersona}
+              >
+                Clear Data
+              </button>
+            )}
           </div>
         </section>
       </div>
