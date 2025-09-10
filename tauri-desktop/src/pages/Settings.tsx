@@ -49,13 +49,22 @@ export function Settings() {
     totalBatches: 0,
     documentsFetched: 0
   });
+  const [hasAutoFetched, setHasAutoFetched] = useState(false);
 
-  // Load saved data on component mount and auto-fetch API data
+  // Load saved data on component mount and auto-fetch API data only if localStorage is empty
   useEffect(() => {
     loadSavedData();
-    // Auto-fetch API data when component mounts (with small delay to ensure component is ready)
+    // Only auto-fetch API data if no saved data exists
     const timer = setTimeout(() => {
-      fetchApiData();
+      const savedData = localStorage.getItem('navi-regulations-data');
+      if (!savedData) {
+        console.log('No saved data found, auto-fetching API data...');
+        setHasAutoFetched(true);
+        fetchApiData(false); // Fetch sample data by default
+      } else {
+        console.log('Saved data found, skipping auto-fetch');
+        setHasAutoFetched(false);
+      }
     }, 1000);
     
     return () => clearTimeout(timer);
@@ -182,6 +191,7 @@ export function Settings() {
   const fetchApiData = async (fetchAll: boolean = false) => {
     setIsFetchingApi(true);
     setApiError(null);
+    setHasAutoFetched(false); // Reset auto-fetch flag for manual fetches
     setFetchProgress({
       isFetching: true,
       currentBatch: 0,
@@ -446,6 +456,7 @@ export function Settings() {
       localStorage.removeItem('navi-last-fetch');
       setSavedData(null);
       setLastFetchTime(null);
+      setHasAutoFetched(true); // Mark as auto-fetch since we're clearing and refetching
       console.log('Cleared saved data');
       
       // Dispatch custom event to notify other components that data was cleared
@@ -950,12 +961,17 @@ export function Settings() {
           {fetchProgress.isFetching && (
             <Alert severity="info" sx={{ mb: 2 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-                📥 Fetching Documents...
+                📥 {hasAutoFetched ? 'Auto-fetching Documents...' : 'Fetching Documents...'}
               </Typography>
               <Typography variant="body2">
                 Batch {fetchProgress.currentBatch} of {fetchProgress.totalBatches} • 
                 Documents fetched: {fetchProgress.documentsFetched}
                 {paginationConfig.total > 0 && ` of ${paginationConfig.total}`}
+                {hasAutoFetched && (
+                  <span style={{ color: '#666', fontSize: '0.8em' }}>
+                    {' '}• Auto-fetch (no saved data found)
+                  </span>
+                )}
               </Typography>
             </Alert>
           )}
