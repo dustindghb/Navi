@@ -37,6 +37,18 @@ export function Settings() {
   const [ollamaTagsTest, setOllamaTagsTest] = useState<string | null>(null);
   const [isTestingOllamaTags, setIsTestingOllamaTags] = useState(false);
   const [isClearingData, setIsClearingData] = useState(false);
+  const [paginationConfig, setPaginationConfig] = useState({
+    limit: 50,
+    offset: 0,
+    total: 0,
+    hasMore: false
+  });
+  const [fetchProgress, setFetchProgress] = useState({
+    isFetching: false,
+    currentBatch: 0,
+    totalBatches: 0,
+    documentsFetched: 0
+  });
 
   // Load saved data on component mount and auto-fetch API data
   useEffect(() => {
@@ -167,103 +179,195 @@ export function Settings() {
     }
   };
 
-  const fetchApiData = async () => {
+  const fetchApiData = async (fetchAll: boolean = false) => {
     setIsFetchingApi(true);
     setApiError(null);
+    setFetchProgress({
+      isFetching: true,
+      currentBatch: 0,
+      totalBatches: 0,
+      documentsFetched: 0
+    });
 
-    const url = 'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/data?all=true';
-    
     console.log('=== API FETCH START ===');
-    console.log('URL:', url);
-    console.log('Using Tauri HTTP client to bypass CORS');
-    console.log('Tauri fetch available:', typeof tauriFetch);
+    console.log('Fetch mode:', fetchAll ? 'Fetch All (with pagination)' : 'Fetch Sample (50 documents)');
 
     try {
-      console.log('Attempting to fetch regulations data from API...');
+      const baseUrl = 'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod';
+      const limit = fetchAll ? 100 : 50; // Use larger batches for full fetch
+      let allDocuments: any[] = [];
+      let offset = 0;
+      let totalDocuments = 0;
+      let batchCount = 0;
+
+      // First, get total count
+      console.log('Getting total document count...');
+      const countUrl = `${baseUrl}?limit=1&offset=0`;
       
-      let response;
+      let countResponse;
       try {
-        // Try Tauri HTTP client first
-        console.log('Trying Tauri HTTP client...');
-        console.log('Tauri fetch function:', tauriFetch);
-        
-        response = await tauriFetch(url, {
+        countResponse = await tauriFetch(countUrl, {
           method: 'GET',
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
           }
         });
-        console.log('Tauri HTTP client succeeded');
+        console.log('Count fetch via Tauri succeeded');
       } catch (tauriError) {
-        console.log('Tauri HTTP client failed, trying browser fetch...', tauriError);
-        console.log('Tauri error details:', {
-          name: tauriError?.name,
-          message: tauriError?.message,
-          stack: tauriError?.stack,
-          cause: tauriError?.cause
-        });
-        
-        // Fallback to browser fetch
-        response = await fetch(url, {
+        console.log('Tauri failed for count, trying browser fetch...', tauriError);
+        countResponse = await fetch(countUrl, {
           method: 'GET',
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
           }
         });
-        console.log('Browser fetch succeeded');
+        console.log('Count fetch via browser succeeded');
       }
-      
-      console.log('API Response received:', {
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers,
-        ok: response.ok
-      });
-      
-      if (!response.ok) {
-        let errorText = '';
+
+      if (!countResponse.ok) {
+        const errorText = await countResponse.text();
+        console.error('Count API Error Response:', errorText);
+        throw new Error(`Count HTTP ${countResponse.status}: ${countResponse.statusText} - ${errorText}`);
+      }
+
+      const countData = await countResponse.json();
+      totalDocuments = countData.data?.pagination?.total || 0;
+      console.log('Total documents available:', totalDocuments);
+
+      if (totalDocuments === 0) {
+        throw new Error('No documents found in the API');
+      }
+
+      // Calculate total batches needed
+      const totalBatches = fetchAll ? Math.ceil(totalDocuments / limit) : 1;
+      setFetchProgress(prev => ({
+        ...prev,
+        totalBatches,
+        documentsFetched: 0
+      }));
+
+      // Fetch documents in batches
+      while (offset < totalDocuments && (fetchAll || batchCount === 0)) {
+        batchCount++;
+        console.log(`Fetching batch ${batchCount}/${totalBatches} (offset: ${offset}, limit: ${limit})`);
+        
+        setFetchProgress(prev => ({
+          ...prev,
+          currentBatch: batchCount
+        }));
+
+        const batchUrl = `${baseUrl}?limit=${limit}&offset=${offset}`;
+        
+        let batchResponse;
         try {
-          errorText = await response.text();
-          console.log('Error response body:', errorText);
-        } catch (e) {
-          console.log('Could not read error response body:', e);
+          batchResponse = await tauriFetch(batchUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            }
+          });
+          console.log(`Batch ${batchCount} fetch via Tauri succeeded`);
+        } catch (tauriError) {
+          console.log(`Tauri failed for batch ${batchCount}, trying browser fetch...`, tauriError);
+          batchResponse = await fetch(batchUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            }
+          });
+          console.log(`Batch ${batchCount} fetch via browser succeeded`);
         }
-        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+
+        if (!batchResponse.ok) {
+          const errorText = await batchResponse.text();
+          console.error(`Batch ${batchCount} API Error Response:`, errorText);
+          throw new Error(`Batch ${batchCount} HTTP ${batchResponse.status}: ${batchResponse.statusText} - ${errorText}`);
+        }
+
+        const batchData = await batchResponse.json();
+        console.log(`Batch ${batchCount} received:`, {
+          success: batchData.success,
+          documentCount: batchData.data?.documents?.length || 0,
+          pagination: batchData.data?.pagination
+        });
+
+        if (batchData.success && batchData.data?.documents) {
+          allDocuments = [...allDocuments, ...batchData.data.documents];
+          setFetchProgress(prev => ({
+            ...prev,
+            documentsFetched: allDocuments.length
+          }));
+        }
+
+        // Update pagination config
+        if (batchData.data?.pagination) {
+          setPaginationConfig({
+            limit: batchData.data.pagination.limit,
+            offset: batchData.data.pagination.offset,
+            total: batchData.data.pagination.total,
+            hasMore: batchData.data.pagination.has_more
+          });
+        }
+
+        offset += limit;
+
+        // If not fetching all, break after first batch
+        if (!fetchAll) {
+          break;
+        }
+
+        // Add small delay between batches to be respectful to the API
+        if (offset < totalDocuments) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
       }
 
-      console.log('Response is OK, parsing JSON...');
-      const data = await response.json();
-      console.log('Successfully fetched API data:', data);
-      console.log('Data type:', typeof data);
-      console.log('Data keys:', data ? Object.keys(data) : 'No keys');
-      
-      // Validate the data structure
-      if (!data || typeof data !== 'object') {
-        throw new Error('Invalid data format received from API');
-      }
+      console.log('=== ALL DATA RECEIVED ===');
+      console.log('Total documents fetched:', allDocuments.length);
+      console.log('Sample document structure:', allDocuments[0] ? {
+        documentId: allDocuments[0].documentId,
+        title: allDocuments[0].title,
+        hasEmbedding: !!allDocuments[0].embedding,
+        embeddingLength: allDocuments[0].embedding?.length || 0,
+        hasContent: !!allDocuments[0].content,
+        contentLength: allDocuments[0].content?.length || 0,
+        allKeys: Object.keys(allDocuments[0])
+      } : 'No documents');
 
-      setApiData(data);
-      setLastFetchTime(new Date().toISOString());
-      console.log('API data set successfully');
-      
-      // Automatically save the data locally after successful fetch
-      const timestamp = new Date().toISOString();
-      const dataToSave = {
-        ...data,
-        _saved_at: timestamp
+      // Format the data for storage
+      const formattedData = {
+        documents: allDocuments,
+        pagination: {
+          total: totalDocuments,
+          fetched: allDocuments.length,
+          batches: batchCount,
+          limit: limit,
+          fetchMode: fetchAll ? 'all' : 'sample'
+        },
+        _saved_at: new Date().toISOString()
       };
 
-      localStorage.setItem('navi-regulations-data', JSON.stringify(dataToSave));
-      localStorage.setItem('navi-last-fetch', timestamp);
+      // Save the data to localStorage
+      localStorage.setItem('navi-regulations-data', JSON.stringify(formattedData));
+      localStorage.setItem('navi-last-fetch', formattedData._saved_at);
       
-      setSavedData(dataToSave);
-      console.log('API data automatically saved locally:', dataToSave);
+      setSavedData(formattedData);
+      setApiData(formattedData);
+      setLastFetchTime(new Date().toISOString());
+      
+      console.log('Data saved to localStorage:', {
+        totalDocuments: allDocuments.length,
+        timestamp: formattedData._saved_at,
+        fetchMode: fetchAll ? 'all' : 'sample'
+      });
       
       // Dispatch custom event to notify other components
       window.dispatchEvent(new CustomEvent('storageChange', {
-        detail: { key: 'navi-regulations-data', value: dataToSave }
+        detail: { key: 'navi-regulations-data', value: formattedData }
       }));
       
     } catch (err) {
@@ -273,13 +377,6 @@ export function Settings() {
       console.error('Error message:', err instanceof Error ? err.message : String(err));
       console.error('Error stack:', err instanceof Error ? err.stack : 'No stack trace');
       console.error('Full error object:', err);
-      console.error('Error details:', {
-        name: err?.name,
-        message: err?.message,
-        stack: err?.stack,
-        cause: err?.cause,
-        code: err?.code
-      });
       
       // More detailed error message
       let errorMessage = 'Failed to fetch data from API';
@@ -298,6 +395,12 @@ export function Settings() {
       setApiError(errorMessage);
     } finally {
       setIsFetchingApi(false);
+      setFetchProgress({
+        isFetching: false,
+        currentBatch: 0,
+        totalBatches: 0,
+        documentsFetched: 0
+      });
       console.log('=== API FETCH END ===');
     }
   };
@@ -369,7 +472,7 @@ export function Settings() {
     
     const testUrls = [
       'https://httpbin.org/get',
-      'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/data?all=true',
+      'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/?all=true',
       'http://10.0.4.52:11434/api/tags' // Test Ollama endpoint
     ];
 
@@ -404,6 +507,48 @@ export function Settings() {
     
     setIsTestingConnectivity(false);
     console.log('=== CONNECTIVITY TEST END ===');
+  };
+
+  const testApiVsS3 = async () => {
+    console.log('=== TESTING NEW API ENDPOINT ===');
+    
+    // Test the new API endpoint
+    try {
+      const apiResponse = await tauriFetch('https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod?limit=5&offset=0', {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        }
+      });
+      
+      if (apiResponse.ok) {
+        const apiData = await apiResponse.json();
+        console.log('New API Response structure:', {
+          success: apiData.success,
+          hasData: !!apiData.data,
+          hasDocuments: !!apiData.data?.documents,
+          documentCount: apiData.data?.documents?.length || 0,
+          pagination: apiData.data?.pagination,
+          firstDocumentKeys: apiData.data?.documents?.[0] ? Object.keys(apiData.data.documents[0]) : 'No documents',
+          hasWebLinks: apiData.data?.documents?.[0] ? {
+            webCommentLink: !!apiData.data.documents[0].webCommentLink,
+            webDocumentLink: !!apiData.data.documents[0].webDocumentLink,
+            webDocketLink: !!apiData.data.documents[0].webDocketLink
+          } : 'No documents'
+        });
+        
+        // Show a sample of what the API returns
+        if (apiData.data?.documents?.[0]) {
+          console.log('Sample API document:', JSON.stringify(apiData.data.documents[0], null, 2));
+        }
+      } else {
+        console.error('API test failed:', apiResponse.status, apiResponse.statusText);
+      }
+    } catch (err) {
+      console.error('Error testing new API:', err);
+    }
+    
+    console.log('=== END NEW API TEST ===');
   };
 
   const testOllamaTags = async () => {
@@ -465,30 +610,69 @@ export function Settings() {
   };
 
   const splitApiData = (data: any) => {
-    if (!data || !data.items || !Array.isArray(data.items)) {
+    console.log('=== SPLIT API DATA START ===');
+    console.log('Input data structure:', {
+      hasData: !!data,
+      hasDocuments: !!(data && data.documents),
+      documentsIsArray: !!(data && data.documents && Array.isArray(data.documents)),
+      documentsLength: data?.documents?.length || 0,
+      firstDocumentKeys: data?.documents?.[0] ? Object.keys(data.documents[0]) : 'No documents',
+      pagination: data?.pagination
+    });
+
+    if (!data || !data.documents || !Array.isArray(data.documents)) {
+      console.log('Invalid data structure, returning null');
       return { embeddings: null, summaries: null };
     }
 
     const embeddings: any[] = [];
     const summaries: any[] = [];
 
-    data.items.forEach((item: any) => {
-      if (item.data) {
-        // Create embedding object with embedding, documentId, and title
+    data.documents.forEach((document: any, index: number) => {
+      console.log(`Processing document ${index}:`, {
+        documentId: document.documentId,
+        title: document.title,
+        hasEmbedding: !!document.embedding,
+        embeddingLength: document.embedding ? document.embedding.length : 0,
+        hasContent: !!document.content,
+        contentLength: document.content ? document.content.length : 0,
+        allKeys: Object.keys(document)
+      });
+      
+      if (document) {
+        // Create embedding object with embedding, documentId, title, and links
         const embeddingObj = {
-          documentId: item.data.documentId,
-          title: item.data.title,
-          embedding: item.data.embedding || null
+          documentId: document.documentId,
+          title: document.title,
+          embedding: document.embedding || null,
+          webCommentLink: document.webCommentLink || null,
+          webDocumentLink: document.webDocumentLink || null,
+          webDocketLink: document.webDocketLink || null,
+          s3Key: document.s3Key || null,
+          metadata: document.metadata || null
         };
         embeddings.push(embeddingObj);
 
         // Create summary object with all attributes except embedding
-        const { embedding, ...summaryData } = item.data;
+        const { embedding, ...summaryData } = document;
         summaries.push(summaryData);
       }
     });
 
-    return {
+    // Log summary of extracted data
+    console.log('Split data summary:', {
+      totalDocuments: data.documents.length,
+      embeddingsCount: embeddings.length,
+      summariesCount: summaries.length,
+      pagination: data.pagination,
+      firstEmbeddingLinks: embeddings[0] ? {
+        webCommentLink: embeddings[0].webCommentLink,
+        webDocumentLink: embeddings[0].webDocumentLink,
+        webDocketLink: embeddings[0].webDocketLink
+      } : 'No embeddings'
+    });
+
+    const result = {
       embeddings: {
         count: embeddings.length,
         items: embeddings,
@@ -498,8 +682,12 @@ export function Settings() {
         count: summaries.length,
         items: summaries,
         _saved_at: data._saved_at
-      }
+      },
+      pagination: data.pagination
     };
+
+    console.log('=== SPLIT API DATA END ===');
+    return result;
   };
 
   return (
@@ -625,6 +813,14 @@ export function Settings() {
             >
               {isTestingOllamaTags ? 'Testing...' : 'Test Ollama Access'}
             </Button>
+            
+            <Button
+              variant="outlined"
+              onClick={testApiVsS3}
+              style={{ background: '#2A4A2A', color: '#4CAF50', borderColor: '#4CAF50' }}
+            >
+              Test New API Endpoint
+            </Button>
           </Box>
 
           {ollamaTagsTest && (
@@ -664,9 +860,11 @@ export function Settings() {
               API Configuration:
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
-              URL: https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/data?all=true<br/>
+              URL: https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod<br/>
               Method: GET<br/>
-              Client: Tauri HTTP (bypasses CORS)
+              Pagination: ?limit=50&offset=0<br/>
+              Client: Tauri HTTP (bypasses CORS)<br/>
+              Features: Pagination, Progress Tracking, Error Handling
             </Typography>
           </Box>
 
@@ -683,10 +881,20 @@ export function Settings() {
             <Button
               variant="contained"
               startIcon={<DownloadIcon />}
-              onClick={fetchApiData}
+              onClick={() => fetchApiData(false)}
               disabled={isFetchingApi}
             >
-              {isFetchingApi ? 'Fetching...' : 'Refresh API Data'}
+              {isFetchingApi && !fetchProgress.isFetching ? 'Fetching...' : 'Fetch Sample (50 docs)'}
+            </Button>
+            
+            <Button
+              variant="contained"
+              color="secondary"
+              startIcon={<DownloadIcon />}
+              onClick={() => fetchApiData(true)}
+              disabled={isFetchingApi}
+            >
+              {isFetchingApi && fetchProgress.isFetching ? 'Fetching All...' : 'Fetch All Documents'}
             </Button>
             
             <Button
@@ -739,13 +947,28 @@ export function Settings() {
             </Alert>
           )}
 
+          {fetchProgress.isFetching && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                📥 Fetching Documents...
+              </Typography>
+              <Typography variant="body2">
+                Batch {fetchProgress.currentBatch} of {fetchProgress.totalBatches} • 
+                Documents fetched: {fetchProgress.documentsFetched}
+                {paginationConfig.total > 0 && ` of ${paginationConfig.total}`}
+              </Typography>
+            </Alert>
+          )}
+
           {savedData && (
             <Alert severity="success" sx={{ mb: 2 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
                 ✓ Data saved locally
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                {getDataSummary(savedData)} • Saved at {savedData._saved_at ? new Date(savedData._saved_at).toLocaleString() : 'Unknown time'}
+                {savedData.documents ? `${savedData.documents.length} documents` : getDataSummary(savedData)} • 
+                {savedData.pagination ? ` ${savedData.pagination.fetchMode} mode` : ''} • 
+                Saved at {savedData._saved_at ? new Date(savedData._saved_at).toLocaleString() : 'Unknown time'}
               </Typography>
             </Alert>
           )}

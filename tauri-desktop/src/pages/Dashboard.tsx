@@ -43,35 +43,20 @@ interface EmbeddingData {
     documentId: string;
     title: string;
     embedding: number[];
+    webCommentLink?: string;
+    webDocumentLink?: string;
+    webDocketLink?: string;
   }>;
   _saved_at?: string;
 }
 
-interface SummaryData {
-  count: number;
-  items: Array<{
-    content: string;
-    docketId: string | null;
-    documentId: string;
-    title: string;
-    agencyId: string;
-    documentType: string;
-    webCommentLink?: string;
-    webDocumentLink?: string;
-    openForComment?: boolean;
-    withinCommentPeriod?: boolean;
-    commentEndDate?: string;
-    commentStartDate?: string;
-    postedDate?: string;
-  }>;
-  _saved_at?: string;
-}
+// SummaryData interface removed - only using embeddingData now
 
 export function Dashboard() {
   const [persona, setPersona] = useState<PersonaData | null>(null);
   const [apiData, setApiData] = useState<ApiData | null>(null);
   const [embeddingData, setEmbeddingData] = useState<EmbeddingData | null>(null);
-  const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
+  // summaryData removed - only using embeddingData now
   const [relevantBoards, setRelevantBoards] = useState<CommentBoard[]>([]);
   const [matchedDocumentIds, setMatchedDocumentIds] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -157,10 +142,7 @@ export function Dashboard() {
       addLog(`Loaded embedding data with ${data.embeddings.count} items`);
     }
     
-    if (data.summaries && data.summaries.items) {
-      setSummaryData(data.summaries);
-      addLog(`Loaded summary data with ${data.summaries.count} items`);
-    }
+    // Summary data loading removed - only using embedding data now
   };
 
   const loadData = () => {
@@ -450,7 +432,7 @@ export function Dashboard() {
     }
   };
 
-  const createEmbeddingMatchingPrompt = (persona: PersonaData, embeddingItems: Array<{documentId: string, title: string, embedding: number[]}>): string => {
+  const createEmbeddingMatchingPrompt = (persona: PersonaData, embeddingItems: Array<{documentId: string, title: string, embedding: number[], webCommentLink?: string, webDocumentLink?: string, webDocketLink?: string}>): string => {
     const personaInfo = `
 Persona Information:
 - Name: ${persona.name || 'Not specified'}
@@ -462,6 +444,9 @@ Persona Information:
 ${index + 1}. Title: ${item.title}
    Document ID: ${item.documentId}
    Embedding: [${item.embedding.slice(0, 10).join(', ')}...] (${item.embedding.length} dimensions)
+   ${item.webCommentLink ? `Comment Link: ${item.webCommentLink}` : ''}
+   ${item.webDocumentLink ? `Document Link: ${item.webDocumentLink}` : ''}
+   ${item.webDocketLink ? `Docket Link: ${item.webDocketLink}` : ''}
 `).join('\n');
 
     return `
@@ -661,94 +646,7 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
     return diffDays;
   };
 
-  const generateRelevanceReasoning = async (documentId: string) => {
-    if (!persona || !summaryData) return;
-
-    try {
-      addLog(`=== GENERATING RELEVANCE REASONING FOR ${documentId} ===`);
-      
-      // Find the document in summary data
-      const document = summaryData.items.find(item => item.documentId === documentId);
-      if (!document) {
-        addLog(`Document ${documentId} not found in summary data`);
-        return null;
-      }
-
-      const personaInfo = `
-Persona Information:
-- Name: ${persona.name || 'Not specified'}
-- Role: ${persona.role || 'Not specified'}
-- Interests: ${persona.interests ? persona.interests.join(', ') : 'Not specified'}
-`;
-
-      const documentInfo = `
-Document Information:
-- Title: ${document.title}
-- Agency: ${document.agencyId}
-- Type: ${document.documentType}
-- Document ID: ${document.documentId}
-- Docket ID: ${document.docketId || 'N/A'}
-- Content: ${document.content.substring(0, 1000)}...
-`;
-
-      const prompt = `
-You are a civic engagement assistant. Analyze why this specific regulatory document would be relevant to the given persona.
-
-${personaInfo}
-
-${documentInfo}
-
-Task: Provide a detailed explanation of why this document is relevant to this persona, considering their role, interests, and background. Focus on specific connections and opportunities for civic engagement.
-
-Respond with a clear, concise explanation (2-3 sentences) that explains the relevance and potential impact for this persona.
-`;
-
-      // Get Ollama configuration
-      const host = '10.0.4.52';
-      const port = '11434';
-      const model = 'gpt-oss:20b';
-      
-      const url = `http://${host}:${port}/api/generate`;
-      const payload = {
-        model: model,
-        prompt: prompt,
-        stream: false
-      };
-
-      addLog('Sending relevance reasoning request to Ollama...');
-      
-      let response;
-      try {
-        response = await tauriFetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        });
-      } catch (tauriError) {
-        response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        });
-      }
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      addLog(`Relevance reasoning generated: ${data.response}`);
-      
-      return data.response;
-    } catch (err) {
-      addLog(`Error generating relevance reasoning: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
-    }
-  };
+  // generateRelevanceReasoning function removed - not needed with embedding-only approach
 
   return (
     <div style={{ 
@@ -803,11 +701,11 @@ Respond with a clear, concise explanation (2-3 sentences) that explains the rele
                 width: 8, 
                 height: 8, 
                 borderRadius: '50%', 
-                background: (apiData || (embeddingData && summaryData)) ? '#4CAF50' : '#FF6B6B' 
+                background: (apiData || embeddingData) ? '#4CAF50' : '#FF6B6B' 
               }} />
               <span style={{ fontSize: '14px', color: '#B8B8B8' }}>
                 API Data: {apiData ? `${apiData.count} items` : 
-                          (embeddingData && summaryData) ? `${embeddingData.count} embeddings, ${summaryData.count} summaries` : 
+                          embeddingData ? `${embeddingData.count} embeddings` : 
                           'Not loaded'}
                 {(apiData || embeddingData) && (apiData?._saved_at || embeddingData?._saved_at) && (
                   <span style={{ color: '#666', marginLeft: 8 }}>
@@ -1047,35 +945,7 @@ Respond with a clear, concise explanation (2-3 sentences) that explains the rele
                     border: '1px solid #333',
                     borderRadius: 12,
                     padding: 20,
-                    cursor: 'pointer',
                     transition: 'all 0.2s ease'
-                  }}
-                  onClick={async () => {
-                    // Get summary data and generate reasoning
-                    const summaryDoc = summaryData?.items.find(item => item.documentId === documentId);
-                    if (summaryDoc) {
-                      const reasoning = await generateRelevanceReasoning(documentId);
-                      if (reasoning) {
-                        // Create a more detailed modal-like display
-                        const modalContent = `
-Relevance Analysis for: ${summaryDoc.title}
-
-Agency: ${summaryDoc.agencyId}
-Type: ${summaryDoc.documentType}
-Document ID: ${summaryDoc.documentId}
-${summaryDoc.docketId ? `Docket ID: ${summaryDoc.docketId}` : ''}
-
-Why this is relevant to you:
-${reasoning}
-
-${summaryDoc.webCommentLink ? `Comment Link: ${summaryDoc.webCommentLink}` : ''}
-${summaryDoc.webDocumentLink ? `Document Link: ${summaryDoc.webDocumentLink}` : ''}
-                        `;
-                        alert(modalContent);
-                      }
-                    } else {
-                      alert(`Summary data not found for document ${documentId}`);
-                    }
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.borderColor = '#4CAF50';
@@ -1086,44 +956,100 @@ ${summaryDoc.webDocumentLink ? `Document Link: ${summaryDoc.webDocumentLink}` : 
                     e.currentTarget.style.transform = 'translateY(0)';
                   }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ flex: 1 }}>
-                        <h4 style={{ 
-                          margin: '0 0 8px 0', 
-                          fontSize: '16px', 
-                          fontWeight: 600,
-                          lineHeight: '1.4'
-                        }}>
-                          {embeddingDoc?.title || `Document ${documentId}`}
-                        </h4>
-                        
-                        <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
-                          <span style={{ 
-                            background: '#2A4A2A', 
-                            color: '#4CAF50', 
-                            padding: '4px 8px', 
-                            borderRadius: 4, 
-                            fontSize: '12px' 
-                          }}>
-                            Matched via Embeddings
-                          </span>
-                        </div>
-
-                        <div style={{ fontSize: '14px', color: '#B8B8B8' }}>
-                          Document ID: {documentId}
-                        </div>
-                      </div>
-                      
-                      <div style={{ 
-                        background: '#2A4A2A', 
-                        color: '#4CAF50', 
-                        padding: '8px 12px', 
-                        borderRadius: 6, 
-                        fontSize: '12px', 
+                    <div>
+                      <h4 style={{ 
+                        margin: '0 0 8px 0', 
+                        fontSize: '16px', 
                         fontWeight: 600,
-                        marginLeft: 16
+                        lineHeight: '1.4'
                       }}>
-                        Click for Analysis & Links
+                        {embeddingDoc?.title || `Document ${documentId}`}
+                      </h4>
+                      
+                      <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+                        <span style={{ 
+                          background: '#2A4A2A', 
+                          color: '#4CAF50', 
+                          padding: '4px 8px', 
+                          borderRadius: 4, 
+                          fontSize: '12px' 
+                        }}>
+                          Matched via Embeddings
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: '14px', color: '#B8B8B8', marginBottom: 12 }}>
+                        Document ID: {documentId}
+                      </div>
+
+                      {/* Links directly in the card */}
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {embeddingDoc?.webCommentLink && (
+                          <a 
+                            href={embeddingDoc.webCommentLink} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            style={{
+                              background: '#3C362A',
+                              color: '#FAFAFA',
+                              padding: '8px 16px',
+                              borderRadius: 6,
+                              textDecoration: 'none',
+                              fontSize: '14px',
+                              fontWeight: 500
+                            }}
+                          >
+                            Comment
+                          </a>
+                        )}
+                        {embeddingDoc?.webDocumentLink && (
+                          <a 
+                            href={embeddingDoc.webDocumentLink} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            style={{
+                              background: '#2A2A2A',
+                              color: '#B8B8B8',
+                              padding: '8px 16px',
+                              borderRadius: 6,
+                              textDecoration: 'none',
+                              fontSize: '14px',
+                              border: '1px solid #444'
+                            }}
+                          >
+                            View Details
+                          </a>
+                        )}
+                        {embeddingDoc?.webDocketLink && (
+                          <a 
+                            href={embeddingDoc.webDocketLink} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            style={{
+                              background: '#2A4A2A',
+                              color: '#4CAF50',
+                              padding: '8px 16px',
+                              borderRadius: 6,
+                              textDecoration: 'none',
+                              fontSize: '14px',
+                              fontWeight: 500
+                            }}
+                          >
+                            View Docket
+                          </a>
+                        )}
+                        {!embeddingDoc?.webCommentLink && !embeddingDoc?.webDocumentLink && !embeddingDoc?.webDocketLink && (
+                          <span style={{
+                            background: '#2A2A2A',
+                            color: '#666',
+                            padding: '8px 16px',
+                            borderRadius: 6,
+                            fontSize: '14px',
+                            border: '1px solid #444'
+                          }}>
+                            No links available
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
