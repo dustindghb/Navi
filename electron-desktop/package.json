@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "electron .",
-    "dev": "cross-env RENDERER_DEV_URL=http://localhost:5173 electron .",
+    "dev": "cross-env RENDERER_DEV_URL=http://localhost:5173 NODE_ENV=development ELECTRON_DISABLE_SECURITY_WARNINGS=true electron .",
     "renderer:dev": "vite --config renderer/vite.config.ts",
     "renderer:build": "vite build --config renderer/vite.config.ts"
   },

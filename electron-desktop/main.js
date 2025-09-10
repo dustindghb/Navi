@@ -4,10 +4,14 @@ import { spawn, exec } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 
+// Hardcoded remote Ollama host for this app
+const REMOTE_OLLAMA_HOST = '10.0.4.52:11434';
+
 const DEFAULT_OLLAMA_HOST = '127.0.0.1';
 const DEFAULT_OLLAMA_PORT = 11434;
+
 function parseEnvBase() {
-  const envHost = process.env.OLLAMA_HOST; // e.g., http://127.0.0.1:11435
+  const envHost = process.env.OLLAMA_HOST; 
   if (!envHost) return null;
   try {
     const url = new URL(envHost.startsWith('http') ? envHost : `http://${envHost}`);
@@ -16,16 +20,19 @@ function parseEnvBase() {
     return null;
   }
 }
+
 function toBaseURL(host, port) {
   const h = (host || DEFAULT_OLLAMA_HOST).replace(/^https?:\/\//, '');
   const p = Number(port || DEFAULT_OLLAMA_PORT);
   return `http://${h}:${p}`;
 }
 
+
 /**
  * Create the main application window.
  */
 function createWindow() {
+  const isDev = process.env.NODE_ENV === 'development';
   const win = new BrowserWindow({
     width: 900,
     height: 700,
@@ -34,6 +41,8 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webSecurity: !isDev, // Allow external network requests in development only
+      allowRunningInsecureContent: isDev, // Allow insecure content in development
     },
   });
 
@@ -76,6 +85,7 @@ app.on('window-all-closed', () => {
   }
 });
 
+
 // --------------------- Ollama helpers ---------------------
 
 function execCommand(cmd) {
@@ -109,10 +119,15 @@ async function checkOllamaCLI() {
 
 async function isServerRunning(baseURL) {
   try {
-    const res = await fetch(`${baseURL}/api/tags`);
-    if (!res.ok) return false;
-    return true;
+    // Use curl command directly - same as Mac terminal
+    const curlResult = await execCommand(`curl -s --connect-timeout 10 --max-time 15 ${baseURL}/api/tags`);
+    
+    if (!curlResult.error && curlResult.stdout.includes('models')) {
+      return true;
+    }
+    return false;
   } catch (e) {
+    console.log(`Server check failed for ${baseURL}:`, e.message);
     return false;
   }
 }
@@ -412,17 +427,86 @@ ipcMain.handle('ollama:promptStart', async () => {
 ipcMain.handle('chat:send', async (_event, args) => {
   const { model = 'gpt-oss:20b', messages = [], options = {}, stream = false, keep_alive = -1 } = args || {};
   try {
-    const baseURL = await detectOllamaBaseURLForUse();
-    const serverUp = await isServerRunning(baseURL);
-    if (!serverUp) {
-      return { ok: false, error: 'Local model server is not running.' };
+    // Use hardcoded remote host
+    const baseUrl = `http://${REMOTE_OLLAMA_HOST}`;
+    
+    console.log('Chat request - Using baseUrl:', baseUrl);
+    
+    // Use the chat API for better conversation handling
+    const messagesJson = JSON.stringify(messages.map(msg => ({
+      role: msg.role,
+      content: msg.content
+    })));
+    
+    // Use curl to call the remote Ollama chat API
+    const curlCommand = `curl -X POST ${baseUrl}/api/chat \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "${model}",
+    "messages": ${messagesJson},
+    "stream": false
+  }'`;
+    
+    console.log('Executing curl command:', curlCommand);
+    const result = await execCommand(curlCommand);
+    console.log('Curl result:', { error: result.error, stdout: result.stdout, stderr: result.stderr });
+    
+    if (result.error) {
+      return { ok: false, error: `Curl error: ${result.stderr}` };
     }
-    const payload = { model, messages, options, stream: !!stream, keep_alive };
-    const res = await callOllamaChat(baseURL, payload, { timeoutMs: 180000 });
-    if (!res.ok) return res;
-    return { ok: true, baseURL, response: res.data?.message?.content || res.data?.response || '', raw: res.data };
+    
+    // Parse the JSON response
+    try {
+      const responseData = JSON.parse(result.stdout);
+      if (responseData.message && responseData.message.content) {
+        return { ok: true, response: responseData.message.content.trim(), raw: responseData };
+      } else {
+        return { ok: false, error: 'No response from model', raw: responseData };
+      }
+    } catch (parseError) {
+      return { ok: false, error: `Failed to parse response: ${parseError.message}`, raw: result.stdout };
+    }
   } catch (e) {
     return { ok: false, error: String(e) };
+  }
+});
+
+// --------------------- Ollama Generation Handler ---------------------
+
+ipcMain.handle('ollama:generate', async (_event, { model, prompt, options = {} }) => {
+  try {
+    // Use hardcoded remote host
+    const baseUrl = `http://${REMOTE_OLLAMA_HOST}`;
+    
+    // Use curl to call the remote Ollama API directly
+    const curlCommand = `curl -X POST ${baseUrl}/api/generate \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "${model}",
+    "prompt": "${prompt.replace(/"/g, '\\"')}",
+    "stream": false
+  }'`;
+    
+    const result = await execCommand(curlCommand);
+    
+    if (result.error) {
+      throw new Error(`Curl error: ${result.stderr}`);
+    }
+    
+    // Parse the JSON response
+    try {
+      const responseData = JSON.parse(result.stdout);
+      if (responseData.response) {
+        return { success: true, response: responseData.response.trim() };
+      } else {
+        throw new Error('No response from model');
+      }
+    } catch (parseError) {
+      throw new Error(`Failed to parse response: ${parseError.message}`);
+    }
+  } catch (error) {
+    console.error('Ollama generation error:', error);
+    return { success: false, error: error.message };
   }
 });
 
@@ -466,7 +550,24 @@ ipcMain.handle('api:fetchJSON', async (_event, args) => {
     return { ok: false, error: 'Missing URL' };
   }
   try {
-    const { statusCode, body } = await request(url, { method: 'GET' });
+    const opts = {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json, text/plain;q=0.8, */*;q=0.5',
+        'User-Agent': 'NaviApp/0.1 (+electron)'
+      }
+    };
+    let { statusCode, body } = await request(url, opts);
+    // If API Gateway path quirk returns 404, retry with a trailing slash before query string
+    if (statusCode === 404 && url.includes('?') && !/\/_?\?/.test(url)) {
+      const [base, query] = url.split('?');
+      const altUrl = base.endsWith('/') ? url : `${base}/${query ? `?${query}` : ''}`;
+      try {
+        const alt = await request(altUrl, opts);
+        statusCode = alt.statusCode;
+        body = alt.body;
+      } catch {}
+    }
     const text = await body.text();
     let parsed = null;
     try { parsed = JSON.parse(text); } catch {}
@@ -516,7 +617,24 @@ function broadcastApiDataUpdate(payload) {
 async function fetchAndPersistApiData(url) {
   const startedAt = new Date().toISOString();
   try {
-    const { statusCode, body } = await request(url, { method: 'GET' });
+    const opts = {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json, text/plain;q=0.8, */*;q=0.5',
+        'User-Agent': 'NaviApp/0.1 (+electron)'
+      }
+    };
+    let { statusCode, body } = await request(url, opts);
+    // Retry once with trailing slash before query if 404
+    if (statusCode === 404 && url.includes('?') && !/\/_?\?/.test(url)) {
+      const [base, query] = url.split('?');
+      const altUrl = base.endsWith('/') ? url : `${base}/${query ? `?${query}` : ''}`;
+      try {
+        const alt = await request(altUrl, opts);
+        statusCode = alt.statusCode;
+        body = alt.body;
+      } catch {}
+    }
     const text = await body.text();
     let parsed = null;
     try { parsed = JSON.parse(text); } catch {}
@@ -609,15 +727,10 @@ function getBoardsForPromptFromApiPayload(payload) {
 }
 
 async function detectOllamaBaseURLForUse() {
-  // Prefer env → 11434 → 11435
-  let base = null;
+  // Use hardcoded host configuration
   const env = parseEnvBase();
-  if (env) base = toBaseURL(env.host, env.port);
-  if (!base) base = toBaseURL(DEFAULT_OLLAMA_HOST, DEFAULT_OLLAMA_PORT);
-  if (await isServerRunning(base)) return base;
-  const alt = toBaseURL(DEFAULT_OLLAMA_HOST, 11435);
-  if (await isServerRunning(alt)) return alt;
-  return base; // fallback; may not be running
+  if (env) return toBaseURL(env.host, env.port);
+  return toBaseURL(DEFAULT_OLLAMA_HOST, DEFAULT_OLLAMA_PORT);
 }
 
 async function generateJsonWithModel(baseURL, modelName, prompt, { temperature = 0.1, num_predict = 64, num_ctx = 8192, timeoutMs = 150000, stream = false, onToken, system, enforceJson = true } = {}) {
@@ -732,6 +845,8 @@ function saveGenSettings(next) {
 
 ipcMain.handle('gen:getSettings', async () => loadGenSettings());
 ipcMain.handle('gen:saveSettings', async (_event, next) => saveGenSettings(next));
+
+
 
 function buildPerItemPrompt(personaSummary, board) {
   const textSnippet = String(board.text || '').split(/\s+/).slice(0, 150).join(' ');

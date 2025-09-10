@@ -81,9 +81,12 @@ contextBridge.exposeInMainWorld('ollama', {
     }
   },
   chat: {
-    send: async (model, messages, options = {}, stream = false, keep_alive = -1) => {
-      return await ipcRenderer.invoke('chat:send', { model, messages, options, stream, keep_alive })
+    send: async (args) => {
+      return await ipcRenderer.invoke('chat:send', args)
     }
+  },
+  generate: async (model, prompt, options) => {
+    return await ipcRenderer.invoke('ollama:generate', { model, prompt, options })
   }
 })
 

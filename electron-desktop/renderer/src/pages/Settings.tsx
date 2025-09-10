@@ -26,6 +26,7 @@ interface CheckResult {
   logs?: any;
 }
 
+
 // Public API auto-fetch types
 interface ApiDataPayload {
   url?: string;
@@ -44,6 +45,7 @@ interface ApiDataStatus {
   hasData?: boolean;
   fetchedAt?: string | null;
 }
+
 
 // Extend Window interface for TypeScript
 declare global {
@@ -83,6 +85,8 @@ export function Settings() {
   const [genCtx, setGenCtx] = useState(8192);
   const [genTemp, setGenTemp] = useState(0.05);
   const [genStream, setGenStream] = useState(true);
+  
+  
 
   useEffect(() => {
     async function loadDefaults() {
@@ -119,6 +123,8 @@ export function Settings() {
     })();
   }, []);
 
+
+
   async function saveGenSettings() {
     try {
       const next = { timeoutMs: Number(genTimeout), num_predict: Number(genMaxTokens), num_ctx: Number(genCtx), temperature: Number(genTemp), stream: !!genStream };
@@ -128,6 +134,8 @@ export function Settings() {
       setError(String(e?.message || e));
     }
   }
+
+
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -233,7 +241,7 @@ export function Settings() {
             AI Model Configuration
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Configure your local AI model for regulation analysis
+            Configure your AI model (connected to 10.0.4.52:11434)
           </Typography>
 
           <Grid container spacing={2}>
@@ -243,24 +251,25 @@ export function Settings() {
                 label="Model Name" 
                 value={model} 
                 onChange={(e) => setModel(e.target.value)}
-                helperText="e.g., llama2:7b, codellama:13b"
+                helperText="e.g., gpt-oss:20b, llama2:7b, codellama:13b"
               />
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField 
                 fullWidth 
                 label="Host" 
-                value={host} 
-                onChange={(e) => setHost(e.target.value)} 
+                value="10.0.4.52" 
+                disabled
+                helperText="Hardcoded remote host"
               />
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField 
                 fullWidth 
                 label="Port" 
-                value={port} 
-                onChange={(e) => setPort(e.target.value)}
-                type="number"
+                value="11434" 
+                disabled
+                helperText="Hardcoded remote port"
               />
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
@@ -296,6 +305,7 @@ export function Settings() {
             </Button>
           </Box>
         </Paper>
+
 
         {detectRes && (
           <Paper sx={{ p: 3, mb: 3 }}>
