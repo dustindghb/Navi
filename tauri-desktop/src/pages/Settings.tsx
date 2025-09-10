@@ -193,7 +193,7 @@ export function Settings() {
     console.log('Fetch mode:', fetchAll ? 'Fetch All (with pagination)' : 'Fetch Sample (50 documents)');
 
     try {
-      const baseUrl = 'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod';
+      const baseUrl = 'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/';
       const limit = fetchAll ? 100 : 50; // Use larger batches for full fetch
       let allDocuments: any[] = [];
       let offset = 0;
@@ -514,7 +514,7 @@ export function Settings() {
     
     // Test the new API endpoint
     try {
-      const apiResponse = await tauriFetch('https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod?limit=5&offset=0', {
+      const apiResponse = await tauriFetch('https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/?limit=5&offset=0', {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
@@ -860,7 +860,7 @@ export function Settings() {
               API Configuration:
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
-              URL: https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod<br/>
+              URL: https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/<br/>
               Method: GET<br/>
               Pagination: ?limit=50&offset=0<br/>
               Client: Tauri HTTP (bypasses CORS)<br/>
