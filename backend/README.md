@@ -120,7 +120,8 @@ CREATE TABLE documents (
 - `web_docket_link`: URL to view the docket
 - `docket_id`: Docket identifier
 - `embedding`: JSON array of embedding vectors for semantic search
-- `posted_date`: When the document was originally posted
+- `posted_date`: When the document was originally posted to regulations.gov
+- `comment_end_date`: When the public comment period ends (if applicable)
 - `created_at`: When the document was added to our database
 
 ### 4. Comments Table
@@ -174,6 +175,26 @@ CREATE TABLE comments (
 - **Body**: `{"documents": [...]}`
 - **Response**: `{"success": true, "inserted": 5, "updated": 2, "total_processed": 7, "errors": []}`
 
+**Document Format Requirements:**
+```json
+{
+  "documentId": "CMS-2025-0834-0001",
+  "title": "Document Title",
+  "content": "Document content...",
+  "agencyId": "CMS",
+  "documentType": "Notice",
+  "postedDate": "2025-09-09T04:00:00Z",
+  "commentEndDate": "2025-11-08T04:59:59Z",
+  "webCommentLink": "https://www.regulations.gov/comment/...",
+  "webDocumentLink": "https://www.regulations.gov/document/...",
+  "webDocketLink": "https://www.regulations.gov/docket/...",
+  "docketId": "CMS-2025-0834",
+  "embedding": [0.024682991, 0.008533115, ...]
+}
+```
+
+**Date Format:** ISO 8601 format (e.g., "2025-09-09T04:00:00Z")
+
 #### Clear All Documents
 - **POST** `/documents/clear`
 - **Body**: `{}`
@@ -223,7 +244,16 @@ User Input → Persona Selection → Document Selection → Comment Generation �
 2. System generates comment using AI (Ollama)
 3. Comment is stored in database linked to persona and document
 
-### 3. Search and Retrieval
+### 3. Date Field Processing
+```
+API Data → Frontend Processing → Database Storage
+```
+
+1. API returns `postedDate` and `commentEndDate` in ISO 8601 format
+2. Frontend calculates `withinCommentPeriod` based on current date vs `commentEndDate`
+3. Database stores dates as TIMESTAMP fields for querying and filtering
+
+### 4. Search and Retrieval
 ```
 User Query → Database Search → Results Display
 ```
@@ -238,6 +268,12 @@ User Query → Database Search → Results Display
 - Documents include embedding vectors for semantic search
 - Embeddings are stored as JSON arrays in the `embedding` field
 - Enables similarity-based document retrieval
+
+### Comment Period Tracking
+- `posted_date`: Tracks when documents were originally published
+- `comment_end_date`: Tracks when public comment periods end
+- Frontend calculates `withinCommentPeriod` based on current date vs `comment_end_date`
+- Enables filtering and highlighting of documents with active comment periods
 
 ### Upsert Behavior
 - Upload operations use upsert logic (insert or update)
@@ -333,6 +369,8 @@ sqlite3 backend/navi.db "SELECT COUNT(*) FROM documents;"
 2. **Wrong document count**: Frontend might be using default limit of 10
 3. **Upload failures**: Check network connectivity and data format
 4. **Database locked**: Ensure only one server instance is running
+5. **Missing date fields**: Ensure `postedDate` and `commentEndDate` are included in document uploads
+6. **Comment period not showing**: Check that `commentEndDate` is properly formatted (ISO 8601)
 
 ### Debug Commands
 ```bash
@@ -391,6 +429,16 @@ SELECT * FROM documents WHERE agency_id = 'FCC';
 
 -- Get recent documents
 SELECT * FROM documents ORDER BY posted_date DESC LIMIT 10;
+
+-- Find documents with active comment periods
+SELECT * FROM documents 
+WHERE comment_end_date > datetime('now') 
+ORDER BY comment_end_date ASC;
+
+-- Find documents with comment periods ending soon (within 7 days)
+SELECT * FROM documents 
+WHERE comment_end_date BETWEEN datetime('now') AND datetime('now', '+7 days')
+ORDER BY comment_end_date ASC;
 
 -- Find comments by persona
 SELECT c.*, p.name as persona_name 

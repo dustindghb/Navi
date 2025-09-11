@@ -60,6 +60,15 @@ export function Settings() {
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Remote Embedding Configuration (new)
+  const [remoteEmbeddingHost, setRemoteEmbeddingHost] = useState('10.0.4.52');
+  const [remoteEmbeddingPort, setRemoteEmbeddingPort] = useState('11434');
+  const [remoteEmbeddingModel, setRemoteEmbeddingModel] = useState('nomic-embed-text:latest');
+  const [remoteEmbeddingTestText, setRemoteEmbeddingTestText] = useState('This is a test text for remote embedding generation');
+  const [isTestingRemoteEmbedding, setIsTestingRemoteEmbedding] = useState(false);
+  const [remoteEmbeddingError, setRemoteEmbeddingError] = useState<string | null>(null);
+  const [remoteEmbeddingTestResult, setRemoteEmbeddingTestResult] = useState<any>(null);
   const [apiData, setApiData] = useState<any>(null);
   const [isFetchingApi, setIsFetchingApi] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -101,10 +110,21 @@ export function Settings() {
   const [localError, setLocalError] = useState<string | null>(null);
   const [localTestResult, setLocalTestResult] = useState<string | null>(null);
 
+  // Local Embedding Model Configuration (new)
+  const [useLocalEmbedding, setUseLocalEmbedding] = useState(false);
+  const [embeddingHost, setEmbeddingHost] = useState('127.0.0.1');
+  const [embeddingPort, setEmbeddingPort] = useState('11435');
+  const [embeddingModel, setEmbeddingModel] = useState('nomic-embed-text:latest');
+  const [embeddingTestText, setEmbeddingTestText] = useState('This is a test text for embedding generation');
+  const [isTestingEmbedding, setIsTestingEmbedding] = useState(false);
+  const [embeddingError, setEmbeddingError] = useState<string | null>(null);
+  const [embeddingTestResult, setEmbeddingTestResult] = useState<any>(null);
+
   // Load saved data on component mount and auto-fetch API data only if localStorage is empty
   useEffect(() => {
     loadSavedData();
     loadLocalOllamaConfig();
+    loadLocalEmbeddingConfig();
     // Only auto-fetch API data if no saved data exists
     const timer = setTimeout(() => {
       const savedData = localStorage.getItem('navi-regulations-data');
@@ -127,6 +147,13 @@ export function Settings() {
       saveLocalOllamaConfig();
     }
   }, [localHost, localPort, localModel, localTestMessage, autoStart, useLocalOllama]);
+
+  // Save local embedding config when values change
+  useEffect(() => {
+    if (embeddingHost || embeddingPort || embeddingModel || embeddingTestText || useLocalEmbedding !== undefined) {
+      saveLocalEmbeddingConfig();
+    }
+  }, [embeddingHost, embeddingPort, embeddingModel, embeddingTestText, useLocalEmbedding]);
 
   const loadSavedData = () => {
     try {
@@ -179,6 +206,40 @@ export function Settings() {
       console.log('Saved local Ollama config to localStorage:', config);
     } catch (err) {
       console.error('Error saving local Ollama config:', err);
+    }
+  };
+
+  const loadLocalEmbeddingConfig = () => {
+    try {
+      const saved = localStorage.getItem('navi-local-embedding-config');
+      if (saved) {
+        const config = JSON.parse(saved);
+        if (config.host) setEmbeddingHost(config.host);
+        if (config.port) setEmbeddingPort(config.port);
+        if (config.model) setEmbeddingModel(config.model);
+        if (config.testText) setEmbeddingTestText(config.testText);
+        if (config.useLocalEmbedding !== undefined) setUseLocalEmbedding(config.useLocalEmbedding);
+        console.log('Loaded local embedding config from localStorage:', config);
+      }
+    } catch (err) {
+      console.error('Error loading local embedding config:', err);
+    }
+  };
+
+  const saveLocalEmbeddingConfig = () => {
+    try {
+      const config = {
+        host: embeddingHost,
+        port: embeddingPort,
+        model: embeddingModel,
+        testText: embeddingTestText,
+        useLocalEmbedding: useLocalEmbedding,
+        _saved_at: new Date().toISOString()
+      };
+      localStorage.setItem('navi-local-embedding-config', JSON.stringify(config));
+      console.log('Saved local embedding config to localStorage:', config);
+    } catch (err) {
+      console.error('Error saving local embedding config:', err);
     }
   };
 
@@ -1226,6 +1287,319 @@ export function Settings() {
     }
   };
 
+  // Comprehensive utility function to prepare persona data for embedding
+  const preparePersonaForEmbedding = (persona: any): string => {
+    if (!persona) return '';
+    
+    const parts = [];
+    
+    // Basic demographic information
+    if (persona.name) parts.push(`Name: ${persona.name}`);
+    if (persona.role) parts.push(`Role: ${persona.role}`);
+    if (persona.location) parts.push(`Location: ${persona.location}`);
+    if (persona.ageRange || persona.age_range) parts.push(`Age Range: ${persona.ageRange || persona.age_range}`);
+    if (persona.employmentStatus || persona.employment_status) parts.push(`Employment Status: ${persona.employmentStatus || persona.employment_status}`);
+    if (persona.industry) parts.push(`Industry: ${persona.industry}`);
+    
+    // Policy interests (handle both frontend and backend field names)
+    const policyInterests = persona.policyInterests || persona.policy_interests || [];
+    if (policyInterests && policyInterests.length > 0) {
+      parts.push(`Policy Interests: ${policyInterests.join(', ')}`);
+    }
+    
+    // Preferred agencies (handle both frontend and backend field names)
+    const preferredAgencies = persona.preferredAgencies || persona.preferred_agencies || [];
+    if (preferredAgencies && preferredAgencies.length > 0) {
+      parts.push(`Preferred Agencies: ${preferredAgencies.join(', ')}`);
+    }
+    
+    // Impact levels (handle both frontend and backend field names)
+    const impactLevel = persona.impactLevel || persona.impact_level || [];
+    if (impactLevel && impactLevel.length > 0) {
+      parts.push(`Impact Level: ${impactLevel.join(', ')}`);
+    }
+    
+    // Additional context (handle both frontend and backend field names)
+    const additionalContext = persona.additionalContext || persona.additional_context;
+    if (additionalContext) {
+      parts.push(`Additional Context: ${additionalContext}`);
+    }
+    
+    // Create a comprehensive persona description for embedding
+    const personaDescription = parts.join('\n');
+    
+    // Add a summary for better semantic matching
+    const summary = `This persona represents a ${persona.role || 'person'} in the ${persona.industry || 'various'} industry, ` +
+      `located in ${persona.location || 'various locations'}, with interests in ${policyInterests.join(', ') || 'various policy areas'}, ` +
+      `preferring to engage with ${preferredAgencies.join(', ') || 'various agencies'} at the ${impactLevel.join(', ') || 'various'} level.`;
+    
+    return `${personaDescription}\n\nSummary: ${summary}`;
+  };
+
+  // Function to generate persona embedding using remote model
+  const generateRemotePersonaEmbedding = async (persona: any): Promise<number[]> => {
+    const personaText = preparePersonaForEmbedding(persona);
+    
+    if (!personaText.trim()) {
+      throw new Error('No persona data available for embedding');
+    }
+    
+    const url = `http://${remoteEmbeddingHost}:${remoteEmbeddingPort}/api/embeddings`;
+    const payload = {
+      model: remoteEmbeddingModel,
+      prompt: personaText
+    };
+
+    console.log('=== GENERATING REMOTE PERSONA EMBEDDING ===');
+    console.log('Persona text:', personaText);
+    console.log('URL:', url);
+    console.log('Payload:', payload);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+    }
+
+    const data = await response.json();
+    const embedding = data.embedding || data.embeddings?.[0];
+    
+    if (!embedding || !Array.isArray(embedding)) {
+      throw new Error('Invalid embedding response from model');
+    }
+    
+    console.log('Generated remote persona embedding with dimensions:', embedding.length);
+    return embedding;
+  };
+
+  // Function to generate persona embedding using local model
+  const generateLocalPersonaEmbedding = async (persona: any): Promise<number[]> => {
+    const personaText = preparePersonaForEmbedding(persona);
+    
+    if (!personaText.trim()) {
+      throw new Error('No persona data available for embedding');
+    }
+    
+    const url = `http://${embeddingHost}:${embeddingPort}/api/embeddings`;
+    const payload = {
+      model: embeddingModel,
+      prompt: personaText
+    };
+
+    console.log('=== GENERATING LOCAL PERSONA EMBEDDING ===');
+    console.log('Persona text:', personaText);
+    console.log('URL:', url);
+    console.log('Payload:', payload);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+    }
+
+    const data = await response.json();
+    const embedding = data.embedding || data.embeddings?.[0];
+    
+    if (!embedding || !Array.isArray(embedding)) {
+      throw new Error('Invalid embedding response from model');
+    }
+    
+    console.log('Generated local persona embedding with dimensions:', embedding.length);
+    return embedding;
+  };
+
+  const testEmbeddingConnection = async () => {
+    setIsTestingEmbedding(true);
+    setEmbeddingError(null);
+    setEmbeddingTestResult(null);
+
+    const url = `http://${embeddingHost}:${embeddingPort}/api/embeddings`;
+    const payload = {
+      model: embeddingModel,
+      prompt: embeddingTestText
+    };
+
+    console.log('=== LOCAL EMBEDDING CONNECTION TEST START ===');
+    console.log('URL:', url);
+    console.log('Payload:', payload);
+    console.log('Host:', embeddingHost);
+    console.log('Port:', embeddingPort);
+    console.log('Model:', embeddingModel);
+    console.log('Test Text:', embeddingTestText);
+
+    try {
+      console.log('Attempting to connect to local embedding model...');
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+      console.log('Browser fetch completed for local embedding connection');
+
+      console.log('Response received:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        ok: response.ok
+      });
+
+      if (!response.ok) {
+        let errorText = '';
+        try {
+          errorText = await response.text();
+          console.log('Error response body:', errorText);
+        } catch (e) {
+          console.log('Could not read error response body:', e);
+        }
+        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+      }
+
+      console.log('Response is OK, parsing JSON...');
+      const data = await response.json();
+      console.log('Parsed response data:', data);
+      
+      const result = {
+        embedding: data.embedding || data.embeddings?.[0] || 'No embedding received',
+        dimensions: data.embedding?.length || data.embeddings?.[0]?.length || 0,
+        model: data.model || embeddingModel
+      };
+      
+      setEmbeddingTestResult(result);
+      console.log('Local embedding connection successful! Result:', result);
+      
+    } catch (err) {
+      console.error('=== LOCAL EMBEDDING CONNECTION ERROR ===');
+      console.error('Error type:', typeof err);
+      console.error('Error constructor:', err?.constructor?.name);
+      console.error('Error message:', err instanceof Error ? err.message : String(err));
+      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack trace');
+      console.error('Full error object:', err);
+      
+      // More detailed error message
+      let errorMessage = 'Local embedding connection failed';
+      if (err instanceof Error) {
+        if (err.message.includes('fetch')) {
+          errorMessage = `Network error: ${err.message}. Check if Ollama is running on ${embeddingHost}:${embeddingPort}`;
+        } else if (err.message.includes('HTTP')) {
+          errorMessage = `HTTP error: ${err.message}`;
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      setEmbeddingError(errorMessage);
+    } finally {
+      setIsTestingEmbedding(false);
+      console.log('=== LOCAL EMBEDDING CONNECTION TEST END ===');
+    }
+  };
+
+  const testRemoteEmbeddingConnection = async () => {
+    setIsTestingRemoteEmbedding(true);
+    setRemoteEmbeddingError(null);
+    setRemoteEmbeddingTestResult(null);
+
+    const url = `http://${remoteEmbeddingHost}:${remoteEmbeddingPort}/api/embeddings`;
+    const payload = {
+      model: remoteEmbeddingModel,
+      prompt: remoteEmbeddingTestText
+    };
+
+    console.log('=== REMOTE EMBEDDING CONNECTION TEST START ===');
+    console.log('URL:', url);
+    console.log('Payload:', payload);
+    console.log('Host:', remoteEmbeddingHost);
+    console.log('Port:', remoteEmbeddingPort);
+    console.log('Model:', remoteEmbeddingModel);
+    console.log('Test Text:', remoteEmbeddingTestText);
+
+    try {
+      console.log('Attempting to connect to remote embedding model...');
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+      console.log('Browser fetch completed for remote embedding connection');
+
+      console.log('Response received:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        ok: response.ok
+      });
+
+      if (!response.ok) {
+        let errorText = '';
+        try {
+          errorText = await response.text();
+          console.log('Error response body:', errorText);
+        } catch (e) {
+          console.log('Could not read error response body:', e);
+        }
+        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+      }
+
+      console.log('Response is OK, parsing JSON...');
+      const data = await response.json();
+      console.log('Parsed response data:', data);
+      
+      const result = {
+        embedding: data.embedding || data.embeddings?.[0] || 'No embedding received',
+        dimensions: data.embedding?.length || data.embeddings?.[0]?.length || 0,
+        model: data.model || remoteEmbeddingModel
+      };
+      
+      setRemoteEmbeddingTestResult(result);
+      console.log('Remote embedding connection successful! Result:', result);
+      
+    } catch (err) {
+      console.error('=== REMOTE EMBEDDING CONNECTION ERROR ===');
+      console.error('Error type:', typeof err);
+      console.error('Error constructor:', err?.constructor?.name);
+      console.error('Error message:', err instanceof Error ? err.message : String(err));
+      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack trace');
+      console.error('Full error object:', err);
+      
+      // More detailed error message
+      let errorMessage = 'Remote embedding connection failed';
+      if (err instanceof Error) {
+        if (err.message.includes('fetch')) {
+          errorMessage = `Network error: ${err.message}. Check if Ollama is running on ${remoteEmbeddingHost}:${remoteEmbeddingPort}`;
+        } else if (err.message.includes('HTTP')) {
+          errorMessage = `HTTP error: ${err.message}`;
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      setRemoteEmbeddingError(errorMessage);
+    } finally {
+      setIsTestingRemoteEmbedding(false);
+      console.log('=== REMOTE EMBEDDING CONNECTION TEST END ===');
+    }
+  };
+
   const splitApiData = (data: any) => {
     console.log('=== SPLIT API DATA START ===');
     console.log('Input data structure:', {
@@ -1435,11 +1809,12 @@ export function Settings() {
           </Alert>
         )}
 
+        {/* Remote Configuration Panel */}
         <Paper sx={{ p: 3, mb: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
             <CloudIcon sx={{ color: 'primary.main' }} />
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Remote Ollama Configuration
+              Remote Configuration
             </Typography>
           </Box>
           
@@ -1452,117 +1827,330 @@ export function Settings() {
               />
             }
             label="Use Remote Configuration"
-            sx={{ mb: 2 }}
-          />
-          
-          <Box sx={{ mb: 2, p: 2, bgcolor: 'background.default', borderRadius: 1, border: '1px solid #333' }}>
-            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
-              Current Configuration:
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
-              Host: {host}<br/>
-              Port: {port}<br/>
-              Model: {model}<br/>
-              URL: http://{host}:{port}/api/generate
-            </Typography>
-          </Box>
-          
-          <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
-            <Box sx={{ flex: 1, minWidth: 200 }}>
-              <TextField
-                fullWidth
-                label="Model"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="e.g., gpt-oss:20b"
-                variant="outlined"
-              />
-            </Box>
-            <Box sx={{ flex: 1, minWidth: 200 }}>
-              <TextField
-                fullWidth
-                label="Host"
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
-                placeholder="e.g., 10.0.4.52"
-                variant="outlined"
-              />
-            </Box>
-            <Box sx={{ flex: 1, minWidth: 200 }}>
-              <TextField
-                fullWidth
-                label="Port"
-                value={port}
-                onChange={(e) => setPort(e.target.value)}
-                placeholder="e.g., 11434"
-                variant="outlined"
-              />
-            </Box>
-          </Box>
-
-          <TextField
-            fullWidth
-            multiline
-            rows={3}
-            label="Test Message"
-            value={testMessage}
-            onChange={(e) => setTestMessage(e.target.value)}
-            placeholder="Enter a test message to send to the model"
-            variant="outlined"
-            sx={{ mb: 2 }}
+            sx={{ mb: 3 }}
           />
 
-          <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
-            <Button
-              variant="contained"
-              onClick={testConnection}
-              disabled={isTesting}
-            >
-              {isTesting ? 'Testing...' : 'Test Ollama Connection'}
-            </Button>
+          {/* Remote Ollama Configuration */}
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, color: 'primary.main' }}>
+              Remote Ollama Configuration
+            </Typography>
             
-            <Button
+            <Box sx={{ mb: 2, p: 2, bgcolor: 'background.default', borderRadius: 1, border: '1px solid #333' }}>
+              <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                Current Configuration:
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                Host: {host}<br/>
+                Port: {port}<br/>
+                Model: {model}<br/>
+                URL: http://{host}:{port}/api/generate
+              </Typography>
+            </Box>
+            
+            <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+              <Box sx={{ flex: 1, minWidth: 200 }}>
+                <TextField
+                  fullWidth
+                  label="Model"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="e.g., gpt-oss:20b"
+                  variant="outlined"
+                />
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 200 }}>
+                <TextField
+                  fullWidth
+                  label="Host"
+                  value={host}
+                  onChange={(e) => setHost(e.target.value)}
+                  placeholder="e.g., 10.0.4.52"
+                  variant="outlined"
+                />
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 200 }}>
+                <TextField
+                  fullWidth
+                  label="Port"
+                  value={port}
+                  onChange={(e) => setPort(e.target.value)}
+                  placeholder="e.g., 11434"
+                  variant="outlined"
+                />
+              </Box>
+            </Box>
+
+            <TextField
+              fullWidth
+              multiline
+              rows={3}
+              label="Test Message"
+              value={testMessage}
+              onChange={(e) => setTestMessage(e.target.value)}
+              placeholder="Enter a test message to send to the model"
               variant="outlined"
-              onClick={testOllamaTags}
-              disabled={isTestingOllamaTags}
-            >
-              {isTestingOllamaTags ? 'Testing...' : 'Test Ollama Access'}
-            </Button>
-            
+              sx={{ mb: 2 }}
+            />
+
+            <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
+              <Button
+                variant="contained"
+                onClick={testConnection}
+                disabled={isTesting}
+              >
+                {isTesting ? 'Testing...' : 'Test Ollama Connection'}
+              </Button>
+              
+              <Button
+                variant="outlined"
+                onClick={testOllamaTags}
+                disabled={isTestingOllamaTags}
+              >
+                {isTestingOllamaTags ? 'Testing...' : 'Test Ollama Access'}
+              </Button>
+            </Box>
+
+            {ollamaTagsTest && (
+              <Alert 
+                severity={ollamaTagsTest.includes('accessible') ? 'success' : 'error'} 
+                sx={{ mb: 2 }}
+              >
+                <Typography variant="body2">
+                  {ollamaTagsTest}
+                </Typography>
+              </Alert>
+            )}
+
+            <Collapse in={!!testResult}>
+              <Alert severity="success" sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                  Ollama Response:
+                </Typography>
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                  {testResult}
+                </Typography>
+              </Alert>
+            </Collapse>
           </Box>
 
-          {ollamaTagsTest && (
-            <Alert 
-              severity={ollamaTagsTest.includes('accessible') ? 'success' : 'error'} 
-              sx={{ mb: 2 }}
-            >
-              <Typography variant="body2">
-                {ollamaTagsTest}
-              </Typography>
-            </Alert>
-          )}
+          <Divider sx={{ my: 3 }} />
 
-          <Collapse in={!!testResult}>
-            <Alert severity="success" sx={{ mt: 2 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-                Ollama Response:
-              </Typography>
-              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                {testResult}
-              </Typography>
-            </Alert>
-          </Collapse>
+          {/* Remote Embedding Configuration */}
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, color: 'primary.main' }}>
+              Remote Embedding Configuration
+            </Typography>
+            
+            {remoteEmbeddingError && (
+              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setRemoteEmbeddingError(null)}>
+                {remoteEmbeddingError}
+              </Alert>
+            )}
+
+            <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+              <Box sx={{ flex: 1, minWidth: 200 }}>
+                <TextField 
+                  fullWidth 
+                  label="Model Name" 
+                  value={remoteEmbeddingModel} 
+                  onChange={(e) => setRemoteEmbeddingModel(e.target.value)}
+                  placeholder="e.g., nomic-embed-text:latest"
+                  variant="outlined"
+                />
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 200 }}>
+                <TextField 
+                  fullWidth 
+                  label="Host" 
+                  value={remoteEmbeddingHost} 
+                  onChange={(e) => setRemoteEmbeddingHost(e.target.value)} 
+                  placeholder="e.g., 10.0.4.52"
+                  variant="outlined"
+                />
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 200 }}>
+                <TextField 
+                  fullWidth 
+                  label="Port" 
+                  value={remoteEmbeddingPort} 
+                  onChange={(e) => setRemoteEmbeddingPort(e.target.value)}
+                  placeholder="11434"
+                  variant="outlined"
+                />
+              </Box>
+            </Box>
+
+            <TextField
+              fullWidth
+              multiline
+              rows={3}
+              label="Test Text for Embedding"
+              value={remoteEmbeddingTestText}
+              onChange={(e) => setRemoteEmbeddingTestText(e.target.value)}
+              placeholder="Enter text to generate embedding for testing"
+              variant="outlined"
+              sx={{ mb: 2 }}
+            />
+
+            <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                onClick={testRemoteEmbeddingConnection}
+                disabled={isTestingRemoteEmbedding}
+              >
+                {isTestingRemoteEmbedding ? 'Testing...' : 'Test Remote Embedding Model'}
+              </Button>
+              
+              <Button 
+                variant="outlined" 
+                color="secondary" 
+                onClick={async () => {
+                  try {
+                    setIsTestingRemoteEmbedding(true);
+                    setRemoteEmbeddingError(null);
+                    setRemoteEmbeddingTestResult(null);
+                    
+                    // Try to get persona from database first, then fallback to localStorage
+                    let persona = null;
+                    
+                    try {
+                      const response = await fetch('http://localhost:8001/personas');
+                      if (response.ok) {
+                        const personas = await response.json();
+                        if (personas.length > 0) {
+                          persona = personas[0]; // Use the most recent persona
+                          console.log('Using persona from database:', persona);
+                        }
+                      }
+                    } catch (dbError) {
+                      console.log('Could not fetch persona from database, trying localStorage:', dbError);
+                    }
+                    
+                    // Fallback to localStorage if no database persona found
+                    if (!persona) {
+                      const savedPersona = localStorage.getItem('navi-persona-data');
+                      if (savedPersona) {
+                        persona = JSON.parse(savedPersona);
+                        console.log('Using persona from localStorage:', persona);
+                      }
+                    }
+                    
+                    if (!persona) {
+                      throw new Error('No persona data found. Please configure your persona first in the "My Persona" section.');
+                    }
+                    
+                    // Generate the embedding using the comprehensive function
+                    const embedding = await generateRemotePersonaEmbedding(persona);
+                    
+                    // Store the embedding in the database
+                    if (persona.id) {
+                      const embeddingResponse = await fetch('http://localhost:8001/personas/embedding', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                          persona_id: persona.id,
+                          embedding: embedding
+                        })
+                      });
+                      
+                      if (embeddingResponse.ok) {
+                        const embeddingResult = await embeddingResponse.json();
+                        console.log('Successfully stored persona embedding in database:', embeddingResult);
+                      } else {
+                        console.error('Failed to store persona embedding in database');
+                      }
+                    }
+                    
+                    setRemoteEmbeddingTestResult({
+                      embedding: embedding,
+                      dimensions: embedding.length,
+                      model: remoteEmbeddingModel,
+                      type: 'persona',
+                      personaText: preparePersonaForEmbedding(persona),
+                      storedInDatabase: !!persona.id
+                    });
+                    
+                    console.log('Successfully generated and stored remote persona embedding:', {
+                      dimensions: embedding.length,
+                      model: remoteEmbeddingModel,
+                      personaSummary: preparePersonaForEmbedding(persona).substring(0, 200) + '...',
+                      storedInDatabase: !!persona.id
+                    });
+                    
+                  } catch (err) {
+                    console.error('Error generating remote persona embedding:', err);
+                    setRemoteEmbeddingError(err instanceof Error ? err.message : 'Failed to generate remote persona embedding');
+                  } finally {
+                    setIsTestingRemoteEmbedding(false);
+                  }
+                }}
+                disabled={isTestingRemoteEmbedding}
+              >
+                {isTestingRemoteEmbedding ? 'Generating...' : 'Test Remote Persona Embedding'}
+              </Button>
+            </Box>
+
+            <Collapse in={!!remoteEmbeddingTestResult}>
+              <Alert severity="success" sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                  {remoteEmbeddingTestResult?.type === 'persona' ? 'Remote Persona Embedding Result:' : 'Remote Embedding Test Result:'}
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <strong>Model:</strong> {remoteEmbeddingTestResult?.model}
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <strong>Dimensions:</strong> {remoteEmbeddingTestResult?.dimensions}
+                </Typography>
+                {remoteEmbeddingTestResult?.type === 'persona' && (
+                  <>
+                    <Typography variant="body2" sx={{ mb: 1 }}>
+                      <strong>Type:</strong> Persona Embedding (ready for semantic search)
+                    </Typography>
+                    {remoteEmbeddingTestResult?.storedInDatabase && (
+                      <Typography variant="body2" sx={{ mb: 1, color: '#4CAF50' }}>
+                        <strong>✓ Stored in Database:</strong> Embedding saved to persona record
+                      </Typography>
+                    )}
+                    <Typography variant="body2" sx={{ mb: 1 }}>
+                      <strong>Persona Text Used:</strong>
+                    </Typography>
+                    <Box sx={{ 
+                      p: 1, 
+                      bgcolor: 'background.default', 
+                      borderRadius: 1, 
+                      border: '1px solid #333',
+                      maxHeight: '150px',
+                      overflowY: 'auto',
+                      fontSize: '0.875rem',
+                      fontFamily: 'monospace',
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {remoteEmbeddingTestResult?.personaText || 'No persona text available'}
+                    </Box>
+                  </>
+                )}
+                <Typography variant="body2" sx={{ mb: 1, mt: 1 }}>
+                  <strong>Embedding Preview:</strong> {Array.isArray(remoteEmbeddingTestResult?.embedding) 
+                    ? `[${remoteEmbeddingTestResult.embedding.slice(0, 5).join(', ')}...]` 
+                    : remoteEmbeddingTestResult?.embedding}
+                </Typography>
+              </Alert>
+            </Collapse>
+          </Box>
         </Paper>
 
-        {/* Local Ollama Configuration */}
+        {/* Local Configuration Panel */}
         <Paper sx={{ p: 3, mb: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
             <ComputerIcon sx={{ color: 'secondary.main' }} />
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Local Ollama Configuration
+              Local Configuration
             </Typography>
           </Box>
-          
           
           <FormControlLabel
             control={
@@ -1576,86 +2164,302 @@ export function Settings() {
             sx={{ mb: 3 }}
           />
 
-          {localError && (
-            <Alert severity="error" sx={{ mb: 3 }} onClose={() => setLocalError(null)}>
-              {localError}
-            </Alert>
-          )}
+          {/* Local Ollama Configuration */}
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, color: 'secondary.main' }}>
+              Local Ollama Configuration
+            </Typography>
 
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-            <Box sx={{ flex: 1, minWidth: 200 }}>
-              <TextField 
-                fullWidth 
-                label="Model Name" 
-                value={localModel} 
-                onChange={(e) => setLocalModel(e.target.value)}
-                variant="outlined"
-              />
+            {localError && (
+              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setLocalError(null)}>
+                {localError}
+              </Alert>
+            )}
+
+            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+              <Box sx={{ flex: 1, minWidth: 200 }}>
+                <TextField 
+                  fullWidth 
+                  label="Model Name" 
+                  value={localModel} 
+                  onChange={(e) => setLocalModel(e.target.value)}
+                  variant="outlined"
+                />
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 200 }}>
+                <TextField 
+                  fullWidth 
+                  label="Host" 
+                  value={localHost} 
+                  onChange={(e) => setLocalHost(e.target.value)} 
+                  placeholder="e.g., 127.0.0.1"
+                  variant="outlined"
+                />
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 200 }}>
+                <TextField 
+                  fullWidth 
+                  label="Port" 
+                  value={localPort} 
+                  onChange={(e) => setLocalPort(e.target.value)}
+                  placeholder="11435"
+                  variant="outlined"
+                />
+              </Box>
             </Box>
-            <Box sx={{ flex: 1, minWidth: 200 }}>
-              <TextField 
-                fullWidth 
-                label="Host" 
-                value={localHost} 
-                onChange={(e) => setLocalHost(e.target.value)} 
-                placeholder="e.g., 127.0.0.1"
-                variant="outlined"
-              />
+
+            <TextField
+              fullWidth
+              multiline
+              rows={3}
+              label="Test Message"
+              value={localTestMessage}
+              onChange={(e) => setLocalTestMessage(e.target.value)}
+              placeholder="Enter a test message to send to the local model"
+              variant="outlined"
+              sx={{ mt: 2 }}
+            />
+
+            <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Button 
+                variant="outlined" 
+                color="secondary" 
+                onClick={detectLocalOllama}
+                disabled={isDetecting}
+              >
+                {isDetecting ? 'Detecting...' : 'Auto-detect Settings'}
+              </Button>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                onClick={testLocalConnection}
+                disabled={isTestingLocal}
+              >
+                {isTestingLocal ? 'Testing...' : 'Test Local Connection'}
+              </Button>
             </Box>
-            <Box sx={{ flex: 1, minWidth: 200 }}>
-              <TextField 
-                fullWidth 
-                label="Port" 
-                value={localPort} 
-                onChange={(e) => setLocalPort(e.target.value)}
-                placeholder="11435"
-                variant="outlined"
-              />
-            </Box>
+
+            <Collapse in={!!localTestResult}>
+              <Alert severity="success" sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                  Local Ollama Response:
+                </Typography>
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                  {localTestResult}
+                </Typography>
+              </Alert>
+            </Collapse>
           </Box>
 
-          <TextField
-            fullWidth
-            multiline
-            rows={3}
-            label="Test Message"
-            value={localTestMessage}
-            onChange={(e) => setLocalTestMessage(e.target.value)}
-            placeholder="Enter a test message to send to the local model"
-            variant="outlined"
-            sx={{ mt: 2 }}
-          />
+          <Divider sx={{ my: 3 }} />
 
-          <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            <Button 
-              variant="outlined" 
-              color="secondary" 
-              onClick={detectLocalOllama}
-              disabled={isDetecting}
-            >
-              {isDetecting ? 'Detecting...' : 'Auto-detect Settings'}
-            </Button>
-            <Button 
-              variant="contained" 
-              color="primary" 
-              onClick={testLocalConnection}
-              disabled={isTestingLocal}
-            >
-              {isTestingLocal ? 'Testing...' : 'Test Local Connection'}
-            </Button>
+          {/* Local Embedding Configuration */}
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, color: 'secondary.main' }}>
+              Local Embedding Configuration
+            </Typography>
+
+            {embeddingError && (
+              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setEmbeddingError(null)}>
+                {embeddingError}
+              </Alert>
+            )}
+
+            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+              <Box sx={{ flex: 1, minWidth: 200 }}>
+                <TextField 
+                  fullWidth 
+                  label="Model Name" 
+                  value={embeddingModel} 
+                  onChange={(e) => setEmbeddingModel(e.target.value)}
+                  placeholder="e.g., nomic-embed-text:latest"
+                  variant="outlined"
+                />
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 200 }}>
+                <TextField 
+                  fullWidth 
+                  label="Host" 
+                  value={embeddingHost} 
+                  onChange={(e) => setEmbeddingHost(e.target.value)} 
+                  placeholder="e.g., 127.0.0.1"
+                  variant="outlined"
+                />
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 200 }}>
+                <TextField 
+                  fullWidth 
+                  label="Port" 
+                  value={embeddingPort} 
+                  onChange={(e) => setEmbeddingPort(e.target.value)}
+                  placeholder="11435"
+                  variant="outlined"
+                />
+              </Box>
+            </Box>
+
+            <TextField
+              fullWidth
+              multiline
+              rows={3}
+              label="Test Text for Embedding"
+              value={embeddingTestText}
+              onChange={(e) => setEmbeddingTestText(e.target.value)}
+              placeholder="Enter text to generate embedding for testing"
+              variant="outlined"
+              sx={{ mt: 2 }}
+            />
+
+            <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                onClick={testEmbeddingConnection}
+                disabled={isTestingEmbedding}
+              >
+                {isTestingEmbedding ? 'Testing...' : 'Test Local Embedding Model'}
+              </Button>
+              
+              <Button 
+                variant="outlined" 
+                color="secondary" 
+                onClick={async () => {
+                  try {
+                    setIsTestingEmbedding(true);
+                    setEmbeddingError(null);
+                    setEmbeddingTestResult(null);
+                    
+                    // Try to get persona from database first, then fallback to localStorage
+                    let persona = null;
+                    
+                    try {
+                      const response = await fetch('http://localhost:8001/personas');
+                      if (response.ok) {
+                        const personas = await response.json();
+                        if (personas.length > 0) {
+                          persona = personas[0]; // Use the most recent persona
+                          console.log('Using persona from database:', persona);
+                        }
+                      }
+                    } catch (dbError) {
+                      console.log('Could not fetch persona from database, trying localStorage:', dbError);
+                    }
+                    
+                    // Fallback to localStorage if no database persona found
+                    if (!persona) {
+                      const savedPersona = localStorage.getItem('navi-persona-data');
+                      if (savedPersona) {
+                        persona = JSON.parse(savedPersona);
+                        console.log('Using persona from localStorage:', persona);
+                      }
+                    }
+                    
+                    if (!persona) {
+                      throw new Error('No persona data found. Please configure your persona first in the "My Persona" section.');
+                    }
+                    
+                    // Generate the embedding using the comprehensive function
+                    const embedding = await generateLocalPersonaEmbedding(persona);
+                    
+                    // Store the embedding in the database
+                    if (persona.id) {
+                      const embeddingResponse = await fetch('http://localhost:8001/personas/embedding', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                          persona_id: persona.id,
+                          embedding: embedding
+                        })
+                      });
+                      
+                      if (embeddingResponse.ok) {
+                        const embeddingResult = await embeddingResponse.json();
+                        console.log('Successfully stored persona embedding in database:', embeddingResult);
+                      } else {
+                        console.error('Failed to store persona embedding in database');
+                      }
+                    }
+                    
+                    setEmbeddingTestResult({
+                      embedding: embedding,
+                      dimensions: embedding.length,
+                      model: embeddingModel,
+                      type: 'persona',
+                      personaText: preparePersonaForEmbedding(persona),
+                      storedInDatabase: !!persona.id
+                    });
+                    
+                    console.log('Successfully generated and stored local persona embedding:', {
+                      dimensions: embedding.length,
+                      model: embeddingModel,
+                      personaSummary: preparePersonaForEmbedding(persona).substring(0, 200) + '...',
+                      storedInDatabase: !!persona.id
+                    });
+                    
+                  } catch (err) {
+                    console.error('Error generating local persona embedding:', err);
+                    setEmbeddingError(err instanceof Error ? err.message : 'Failed to generate local persona embedding');
+                  } finally {
+                    setIsTestingEmbedding(false);
+                  }
+                }}
+                disabled={isTestingEmbedding}
+              >
+                {isTestingEmbedding ? 'Generating...' : 'Test Local Persona Embedding'}
+              </Button>
+            </Box>
+
+            <Collapse in={!!embeddingTestResult}>
+              <Alert severity="success" sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                  {embeddingTestResult?.type === 'persona' ? 'Local Persona Embedding Result:' : 'Local Embedding Test Result:'}
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <strong>Model:</strong> {embeddingTestResult?.model}
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <strong>Dimensions:</strong> {embeddingTestResult?.dimensions}
+                </Typography>
+                {embeddingTestResult?.type === 'persona' && (
+                  <>
+                    <Typography variant="body2" sx={{ mb: 1 }}>
+                      <strong>Type:</strong> Persona Embedding (ready for semantic search)
+                    </Typography>
+                    {embeddingTestResult?.storedInDatabase && (
+                      <Typography variant="body2" sx={{ mb: 1, color: '#4CAF50' }}>
+                        <strong>✓ Stored in Database:</strong> Embedding saved to persona record
+                      </Typography>
+                    )}
+                    <Typography variant="body2" sx={{ mb: 1 }}>
+                      <strong>Persona Text Used:</strong>
+                    </Typography>
+                    <Box sx={{ 
+                      p: 1, 
+                      bgcolor: 'background.default', 
+                      borderRadius: 1, 
+                      border: '1px solid #333',
+                      maxHeight: '150px',
+                      overflowY: 'auto',
+                      fontSize: '0.875rem',
+                      fontFamily: 'monospace',
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {embeddingTestResult?.personaText || 'No persona text available'}
+                    </Box>
+                  </>
+                )}
+                <Typography variant="body2" sx={{ mb: 1, mt: 1 }}>
+                  <strong>Embedding Preview:</strong> {Array.isArray(embeddingTestResult?.embedding) 
+                    ? `[${embeddingTestResult.embedding.slice(0, 5).join(', ')}...]` 
+                    : embeddingTestResult?.embedding}
+                </Typography>
+              </Alert>
+            </Collapse>
           </Box>
-
-          <Collapse in={!!localTestResult}>
-            <Alert severity="success" sx={{ mt: 2 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-                Local Ollama Response:
-              </Typography>
-              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                {localTestResult}
-              </Typography>
-            </Alert>
-          </Collapse>
         </Paper>
+
 
         {/* Detection Results */}
         {detectRes && (

@@ -294,24 +294,48 @@ export function Persona() {
               {/* Policy Interest Categories */}
               <Box>
                 <Typography variant="h6" sx={{ color: '#FAFAFA', marginBottom: 1 }}>
-                  Policy Interest Categories
+                  Specific Policy Interest Areas
                 </Typography>
                 <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 2 }}>
-                  Select all that apply to help match relevant regulations
+                  Be specific! Instead of "Technology", select "AI Regulation" or "Data Privacy". This helps avoid irrelevant matches.
                 </Typography>
                 <Grid container spacing={1}>
                   {[
-                    'Environmental Policy',
-                    'Healthcare & Public Health',
-                    'Technology & Privacy',
-                    'Financial Services & Banking',
-                    'Transportation & Infrastructure',
-                    'Education Policy',
-                    'Labor & Employment',
-                    'Consumer Protection',
-                    'National Security',
-                    'Immigration',
-                    'Energy & Utilities'
+                    'Climate Change & Carbon Emissions',
+                    'Renewable Energy Standards',
+                    'Water Quality & Pollution',
+                    'Air Quality Regulations',
+                    'Waste Management & Recycling',
+                    'Healthcare Data Privacy (HIPAA)',
+                    'Drug Approval & Safety',
+                    'Medical Device Regulations',
+                    'Telehealth & Digital Health',
+                    'AI & Machine Learning Regulation',
+                    'Data Privacy & Protection',
+                    'Cybersecurity Standards',
+                    'Social Media & Content Moderation',
+                    'Cryptocurrency & Digital Assets',
+                    'Banking & Financial Services',
+                    'Consumer Credit & Lending',
+                    'Investment & Securities',
+                    'Aviation Safety & Operations',
+                    'Highway & Road Safety',
+                    'Public Transportation',
+                    'Railroad Regulations',
+                    'Student Loan & Education Finance',
+                    'School Safety & Security',
+                    'Higher Education Accreditation',
+                    'Workplace Safety (OSHA)',
+                    'Minimum Wage & Labor Standards',
+                    'Employee Benefits & Retirement',
+                    'Product Safety & Recalls',
+                    'Food Safety & Labeling',
+                    'Advertising & Marketing Practices',
+                    'Border Security & Immigration',
+                    'Cybersecurity & Critical Infrastructure',
+                    'Nuclear Energy & Safety',
+                    'Electric Grid & Power Systems',
+                    'Oil & Gas Pipeline Safety'
                   ].map((interest) => (
                     <Grid item xs={12} sm={6} md={4} key={interest}>
                       <FormControlLabel
@@ -329,11 +353,14 @@ export function Persona() {
                           />
                         }
                         label={interest}
-                        sx={{ color: '#FAFAFA' }}
+                        sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
                       />
                     </Grid>
                   ))}
                 </Grid>
+                <Typography variant="body2" sx={{ color: '#FFA726', marginTop: 2, fontStyle: 'italic' }}>
+                  💡 Tip: Select only the areas you're genuinely interested in. Too many broad categories can lead to irrelevant matches.
+                </Typography>
               </Box>
 
               <Divider sx={{ my: 2 }} />
@@ -426,18 +453,43 @@ export function Persona() {
 
               <Divider sx={{ my: 2 }} />
 
-              {/* Additional Context */}
-              <TextField
-                label="Additional Context"
-                value={persona.additionalContext || ''}
-                onChange={(e) => { setPersona({ ...persona, additionalContext: e.target.value }); setIsDirty(true); }}
-                placeholder="e.g., I'm particularly interested in regulations affecting small businesses in the tech sector, or I have experience with environmental compliance in manufacturing..."
-                fullWidth
-                multiline
-                rows={5}
-                variant="outlined"
-                helperText="Share any additional information that might help us better match regulations to your interests"
-              />
+              {/* Additional Context - Enhanced */}
+              <Box sx={{ 
+                background: '#2A2A2A', 
+                border: '2px solid #4CAF50', 
+                borderRadius: 2, 
+                p: 3,
+                mb: 2
+              }}>
+                <Typography variant="h6" sx={{ color: '#4CAF50', marginBottom: 1 }}>
+                  🎯 Specific Context & Use Cases
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 2 }}>
+                  This is the MOST IMPORTANT field for accurate matching. Be very specific about your situation, needs, and use cases.
+                </Typography>
+                <TextField
+                  label="Detailed Context & Specific Interests"
+                  value={persona.additionalContext || ''}
+                  onChange={(e) => { setPersona({ ...persona, additionalContext: e.target.value }); setIsDirty(true); }}
+                  placeholder="Examples:
+• I run a small tech startup and need to understand data privacy regulations for my SaaS product
+• I'm a healthcare provider implementing telehealth and need to know HIPAA compliance requirements
+• I'm a manufacturer concerned about new EPA emissions standards affecting my facility
+• I'm a consumer advocate focused on protecting vulnerable populations from predatory lending
+• I'm a student studying environmental policy and want to track climate change regulations
+• I'm a small business owner in the food industry and need to understand FDA labeling requirements"
+                  fullWidth
+                  multiline
+                  rows={6}
+                  variant="outlined"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      backgroundColor: '#1A1A1A',
+                    }
+                  }}
+                  helperText="💡 Be specific about your role, industry, location, and exact regulatory concerns. This helps avoid irrelevant matches."
+                />
+              </Box>
 
               {/* Status Messages */}
           {errorText && (

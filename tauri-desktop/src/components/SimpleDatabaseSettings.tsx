@@ -29,7 +29,7 @@ import {
   Dataset as DatabaseIcon,
   Person as PersonIcon
 } from '@mui/icons-material';
-// import { fetch as tauriFetch } from '@tauri-apps/plugin-http'; // Not using Tauri HTTP due to consistency issues
+// import { fetch as tauriFetch } from '@tauri-apps/plugin-http'; // Using regular fetch to match working upload pattern
 
 // Type definitions for database stats
 
@@ -91,6 +91,7 @@ export function SimpleDatabaseSettings() {
   const [showPersonasDialog, setShowPersonasDialog] = useState(false);
   const [showTableViewDialog, setShowTableViewDialog] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
+  const [isClearingDatabase, setIsClearingDatabase] = useState(false);
 
   // Load database stats on component mount
   useEffect(() => {
@@ -99,28 +100,43 @@ export function SimpleDatabaseSettings() {
 
   const loadDatabaseStats = async () => {
     try {
+      console.log('=== LOADING DATABASE STATS ===');
+      
       // Check API health
       const healthResponse = await fetch('http://localhost:8001/health');
       const healthData = await healthResponse.json();
       console.log('API Health Check:', healthData);
 
       // Get document count from database (request all documents to get accurate count)
+      console.log('Fetching documents from API...');
       const documentsResponse = await fetch('http://localhost:8001/documents?limit=10000');
       const documents = await documentsResponse.json();
+      console.log('Documents response:', documents);
+      console.log('Documents type:', typeof documents);
+      console.log('Is array:', Array.isArray(documents));
+      
       const totalDocs = Array.isArray(documents) ? documents.length : 0;
+      console.log('Total documents calculated:', totalDocs);
 
-      setDatabaseStats({
+      const newStats = {
         total_documents: totalDocs,
         last_updated: new Date().toISOString(),
         api_health: true
-      });
+      };
+      
+      console.log('Setting database stats to:', newStats);
+      setDatabaseStats(newStats);
+      console.log('Database stats updated successfully');
+      
     } catch (err) {
       console.error('Error loading database stats:', err);
-      setDatabaseStats({
+      const errorStats = {
         total_documents: 0,
         last_updated: 'Never',
         api_health: false
-      });
+      };
+      console.log('Setting error stats to:', errorStats);
+      setDatabaseStats(errorStats);
     }
   };
 
@@ -175,47 +191,6 @@ export function SimpleDatabaseSettings() {
     }
   };
 
-  const clearDatabase = async () => {
-    if (!confirm('Are you sure you want to clear all documents from the database? This action cannot be undone.')) {
-      return;
-    }
-
-    try {
-      console.log('=== CLEARING DATABASE ===');
-      
-      // Use browser fetch directly for consistency with other requests
-      console.log('Using browser fetch for database clear...');
-      const response = await fetch('http://localhost:8001/documents/clear', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-      console.log('Browser fetch completed for database clear');
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('HTTP error response:', errorText);
-        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
-      }
-
-      const result = await response.json();
-      console.log('Database clear result:', result);
-      
-      // Refresh database stats
-      await loadDatabaseStats();
-      
-      console.log('Database cleared successfully');
-    } catch (err) {
-      console.error('Error clearing database:', err);
-      console.error('Error details:', {
-        name: err instanceof Error ? err.name : 'Unknown',
-        message: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack : undefined
-      });
-      setApiError(`Failed to clear database: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
 
   return (
     <Box sx={{ 
@@ -330,9 +305,26 @@ export function SimpleDatabaseSettings() {
             <Button
               variant="outlined"
               color="error"
-              onClick={clearDatabase}
+              onClick={async () => {
+                console.log('INLINE CLEAR BUTTON CLICKED!');
+                if (confirm('Are you sure you want to clear all documents?')) {
+                  console.log('User confirmed inline clear');
+                  try {
+                    const response = await fetch('http://localhost:8001/documents/clear', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({})
+                    });
+                    const result = await response.json();
+                    alert(`Inline clear successful! Deleted ${result.deleted_count} documents.`);
+                  } catch (err) {
+                    console.error('Inline clear error:', err);
+                    alert(`Inline clear failed: ${err}`);
+                  }
+                }
+              }}
             >
-              Clear Database
+              Clear Documents
             </Button>
           </Box>
         </Paper>

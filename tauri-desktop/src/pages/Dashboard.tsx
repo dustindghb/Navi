@@ -1,130 +1,84 @@
 import { useState, useEffect } from 'react';
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { CommentDrafting } from '../components/CommentDrafting';
 
 interface PersonaData {
+  id?: number;
   name?: string;
   role?: string;
-  interests?: string[];
-  _saved_at?: string;
-}
-
-interface CommentBoard {
+  location?: string;
+  age_range?: string;
+  employment_status?: string;
+  industry?: string;
+  policy_interests?: string[];
+  preferred_agencies?: string[];
+  impact_level?: string[];
+  additional_context?: string;
   embedding?: number[];
-  content: string;
-  docketId: string | null;
-  documentId: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface DocumentData {
+  id: number;
+  document_id: string;
   title: string;
-  agencyId: string;
-  documentType: string;
-  // Legacy fields for backward compatibility
-  openForComment?: boolean;
-  withinCommentPeriod?: boolean;
-  commentEndDate?: string;
-  commentStartDate?: string;
-  postedDate?: string;
-  webCommentLink?: string;
-  webDocumentLink?: string;
-  relevanceScore?: number;
+  content?: string;
+  agency_id?: string;
+  document_type?: string;
+  web_comment_link?: string;
+  web_document_link?: string;
+  web_docket_link?: string;
+  docket_id?: string;
+  embedding?: number[];
+  posted_date?: string;
+  comment_end_date?: string;
+  created_at?: string;
+}
+
+interface GPTReasoningResult {
+  relevanceScore: number; // 1-10
+  reasoning: string;
+  thoughtProcess: string;
+}
+
+interface MatchedDocument {
+  document: DocumentData;
+  similarityScore: number;
   relevanceReason?: string;
+  gptReasoning?: GPTReasoningResult;
 }
-
-interface ApiData {
-  count: number;
-  items: Array<{
-    key: string;
-    data: CommentBoard;
-  }>;
-  _saved_at?: string;
-}
-
-interface EmbeddingData {
-  count: number;
-  items: Array<{
-    documentId: string;
-    title: string;
-    embedding: number[];
-    webCommentLink?: string;
-    webDocumentLink?: string;
-    webDocketLink?: string;
-  }>;
-  _saved_at?: string;
-}
-
-// SummaryData interface removed - only using embeddingData now
 
 export function Dashboard() {
   const [persona, setPersona] = useState<PersonaData | null>(null);
-  const [apiData, setApiData] = useState<ApiData | null>(null);
-  const [embeddingData, setEmbeddingData] = useState<EmbeddingData | null>(null);
-  // summaryData removed - only using embeddingData now
-  const [relevantBoards, setRelevantBoards] = useState<CommentBoard[]>([]);
-  const [matchedDocumentIds, setMatchedDocumentIds] = useState<string[]>([]);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isMatchingEmbeddings, setIsMatchingEmbeddings] = useState(false);
-  const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [lastAnalysis, setLastAnalysis] = useState<string | null>(null);
+  const [documents, setDocuments] = useState<DocumentData[]>([]);
+  const [matchedDocuments, setMatchedDocuments] = useState<MatchedDocument[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
+  
+  // Persona embedding state
+  const [isGeneratingEmbedding, setIsGeneratingEmbedding] = useState(false);
+  const [embeddingError, setEmbeddingError] = useState<string | null>(null);
+  
+  // Document embedding state
+  const [isEmbeddingDocuments, setIsEmbeddingDocuments] = useState(false);
+  const [documentEmbeddingProgress, setDocumentEmbeddingProgress] = useState({ current: 0, total: 0 });
   
   // Comment drafting state
   const [showCommentDrafting, setShowCommentDrafting] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<{id: string, title: string} | null>(null);
+  
+  // GPT reasoning state
+  const [isGeneratingReasoning, setIsGeneratingReasoning] = useState(false);
+  const [reasoningProgress, setReasoningProgress] = useState({ current: 0, total: 0 });
+  const [shouldStopReasoning, setShouldStopReasoning] = useState(false);
 
-  // Load persona and API data on component mount
+  // Load data on component mount
   useEffect(() => {
     loadData();
   }, []);
 
-  // Listen for localStorage changes to automatically refresh data
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'navi-regulations-data' || e.key === 'navi-persona-data') {
-        addLog(`Storage change detected for key: ${e.key}`);
-        loadData();
-      }
-    };
-
-    // Listen for storage events (from other tabs/windows)
-    window.addEventListener('storage', handleStorageChange);
-
-    // Also listen for custom events (from same tab)
-    const handleCustomStorageChange = (e: CustomEvent) => {
-      if (e.detail.key === 'navi-regulations-data' || e.detail.key === 'navi-persona-data') {
-        addLog(`Custom storage change detected for key: ${e.detail.key}`);
-        loadData();
-      }
-    };
-
-    window.addEventListener('storageChange', handleCustomStorageChange as EventListener);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('storageChange', handleCustomStorageChange as EventListener);
-    };
-  }, []);
-
-  // Auto-trigger embedding matching when persona and embedding data are available
-  useEffect(() => {
-    if (persona && embeddingData && embeddingData.items.length > 0 && matchedDocumentIds.length === 0) {
-      addLog('Auto-triggering embedding matching: persona and embedding data available, no existing matches');
-      matchDocumentsWithEmbeddings();
-    } else if (persona && embeddingData && embeddingData.items.length > 0 && matchedDocumentIds.length > 0) {
-      addLog('Skipping auto-matching: matches already exist. Use "Re-match" button to refresh.');
-    }
-  }, [persona, embeddingData]);
-
-  // Fallback to traditional analysis if no embedding data
-  useEffect(() => {
-    if (persona && apiData && apiData.items.length > 0 && relevantBoards.length === 0 && !embeddingData) {
-      addLog('Auto-triggering traditional analysis: persona and API data available, no embedding data');
-      analyzeRelevance();
-    } else if (persona && apiData && apiData.items.length > 0 && relevantBoards.length > 0) {
-      addLog('Skipping auto-analysis: results already exist. Use "Re-analyze" button to refresh.');
-    }
-  }, [persona, apiData, embeddingData]);
-
-  // Custom logging function that adds to both console and UI
   const addLog = (message: string) => {
     const timestamp = new Date().toLocaleTimeString();
     const logMessage = `[${timestamp}] ${message}`;
@@ -132,526 +86,597 @@ export function Dashboard() {
     setConsoleLogs(prev => [...prev.slice(-49), logMessage]); // Keep last 50 logs
   };
 
-  const loadSplitData = (data: any) => {
-    if (!data) return;
+  // Utility function to prepare persona data for embedding
+  const preparePersonaForEmbedding = (persona: PersonaData): string => {
+    if (!persona) return '';
     
-    // If it's already in the expected format, set as apiData
-    if (data.items && Array.isArray(data.items)) {
-      setApiData(data);
+    const parts = [];
+    
+    // Basic information
+    if (persona.name) parts.push(`Name: ${persona.name}`);
+    if (persona.role) parts.push(`Role: ${persona.role}`);
+    if (persona.location) parts.push(`Location: ${persona.location}`);
+    if (persona.age_range) parts.push(`Age Range: ${persona.age_range}`);
+    if (persona.employment_status) parts.push(`Employment Status: ${persona.employment_status}`);
+    if (persona.industry) parts.push(`Industry: ${persona.industry}`);
+    
+    // Policy interests
+    if (persona.policy_interests && persona.policy_interests.length > 0) {
+      parts.push(`Policy Interests: ${persona.policy_interests.join(', ')}`);
+    }
+    
+    // Preferred agencies
+    if (persona.preferred_agencies && persona.preferred_agencies.length > 0) {
+      parts.push(`Preferred Agencies: ${persona.preferred_agencies.join(', ')}`);
+    }
+    
+    // Impact level
+    if (persona.impact_level && persona.impact_level.length > 0) {
+      parts.push(`Impact Level: ${persona.impact_level.join(', ')}`);
+    }
+    
+    // Additional context
+    if (persona.additional_context) {
+      parts.push(`Additional Context: ${persona.additional_context}`);
+    }
+    
+    // Create a comprehensive description
+    const personaDescription = parts.join('. ');
+    
+    // Add semantic summary for better embedding quality
+    const semanticSummary = `This persona represents a ${persona.role || 'person'} in the ${persona.industry || 'general'} industry who is interested in ${persona.policy_interests?.join(', ') || 'various policy areas'} and prefers to engage with ${persona.preferred_agencies?.join(', ') || 'government agencies'}.`;
+    
+    return `${semanticSummary} ${personaDescription}`;
+  };
+
+  // Function to generate persona embedding using remote model
+  const generatePersonaEmbedding = async (persona: PersonaData): Promise<number[]> => {
+    const personaText = preparePersonaForEmbedding(persona);
+    
+    if (!personaText.trim()) {
+      throw new Error('No persona data available for embedding');
+    }
+    
+    // Get remote embedding configuration from localStorage
+    const remoteEmbeddingHost = localStorage.getItem('remoteEmbeddingHost') || '10.0.4.52';
+    const remoteEmbeddingPort = localStorage.getItem('remoteEmbeddingPort') || '11434';
+    const remoteEmbeddingModel = localStorage.getItem('remoteEmbeddingModel') || 'nomic-embed-text:latest';
+    
+    const url = `http://${remoteEmbeddingHost}:${remoteEmbeddingPort}/api/embeddings`;
+      const payload = {
+      model: remoteEmbeddingModel,
+      prompt: personaText
+      };
+
+    addLog('=== GENERATING PERSONA EMBEDDING ===');
+    addLog(`Persona text: ${personaText.substring(0, 200)}...`);
+      addLog(`URL: ${url}`);
+    addLog(`Model: ${remoteEmbeddingModel}`);
+
+    const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload)
+        });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    const result = await response.json();
+    
+    if (!result.embedding || !Array.isArray(result.embedding)) {
+      throw new Error('Invalid embedding response format');
+    }
+
+    addLog(`Generated embedding with ${result.embedding.length} dimensions`);
+    return result.embedding;
+  };
+
+  // Function to generate and store persona embedding
+  const generateAndStorePersonaEmbedding = async () => {
+    if (!persona) {
+      setEmbeddingError('No persona found. Please configure your persona first.');
       return;
     }
-    
-    // If it's split data, load embeddings and summaries separately
-    if (data.embeddings && data.embeddings.items) {
-      setEmbeddingData(data.embeddings);
-      addLog(`Loaded embedding data with ${data.embeddings.count} items`);
+
+    setIsGeneratingEmbedding(true);
+    setEmbeddingError(null);
+    addLog('=== GENERATING PERSONA EMBEDDING ===');
+
+    try {
+      // Generate the embedding
+      const embedding = await generatePersonaEmbedding(persona);
+      
+      // Store the embedding in the database
+      const embeddingResponse = await fetch('http://localhost:8001/personas/embedding', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          persona_id: persona.id,
+          embedding: embedding
+        })
+      });
+      
+      if (embeddingResponse.ok) {
+        const embeddingResult = await embeddingResponse.json();
+        addLog(`Successfully stored persona embedding in database: ${embeddingResult.embedding_dimensions} dimensions`);
+        
+        // Reload persona data to get the updated embedding
+        await loadData();
+        
+        addLog('Persona embedding generation and storage complete!');
+      } else {
+        const errorResult = await embeddingResponse.json();
+        throw new Error(`Failed to store embedding: ${errorResult.error || 'Unknown error'}`);
+      }
+
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      addLog(`Error generating persona embedding: ${errorMessage}`);
+      setEmbeddingError(errorMessage);
+    } finally {
+      setIsGeneratingEmbedding(false);
+      addLog('=== PERSONA EMBEDDING GENERATION COMPLETE ===');
     }
-    
-    // Summary data loading removed - only using embedding data now
   };
 
-  const loadData = () => {
-    addLog('=== LOADING DATA START ===');
+  // Function to embed a single document
+  const embedDocument = async (document: DocumentData): Promise<number[]> => {
+    const documentText = `${document.title}. ${document.content || ''}`.trim();
+    
+    if (!documentText) {
+      throw new Error(`No content available for document ${document.document_id}`);
+    }
+    
+    // Get remote embedding configuration from localStorage
+    const remoteEmbeddingHost = localStorage.getItem('remoteEmbeddingHost') || '10.0.4.52';
+    const remoteEmbeddingPort = localStorage.getItem('remoteEmbeddingPort') || '11434';
+    const remoteEmbeddingModel = localStorage.getItem('remoteEmbeddingModel') || 'nomic-embed-text:latest';
+    
+    const url = `http://${remoteEmbeddingHost}:${remoteEmbeddingPort}/api/embeddings`;
+    const payload = {
+      model: remoteEmbeddingModel,
+      prompt: documentText
+    };
+
+    const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload)
+        });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    const result = await response.json();
+    
+    if (!result.embedding || !Array.isArray(result.embedding)) {
+      throw new Error('Invalid embedding response format');
+    }
+
+    return result.embedding;
+  };
+
+  // Function to embed all documents
+  const embedAllDocuments = async () => {
+    if (documents.length === 0) {
+      setEmbeddingError('No documents found to embed.');
+      return;
+    }
+
+    setIsEmbeddingDocuments(true);
+    setEmbeddingError(null);
+    setDocumentEmbeddingProgress({ current: 0, total: documents.length });
+    addLog('=== EMBEDDING ALL DOCUMENTS ===');
+
+    try {
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (let i = 0; i < documents.length; i++) {
+        const document = documents[i];
+        setDocumentEmbeddingProgress({ current: i + 1, total: documents.length });
+        
+        addLog(`Embedding document ${i + 1}/${documents.length}: ${document.title.substring(0, 50)}...`);
+
+        try {
+          // Generate embedding for this document
+          const embedding = await embedDocument(document);
+          
+          // Store the embedding in the database
+          const embeddingResponse = await fetch('http://localhost:8001/documents/embedding', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              document_id: document.document_id,
+              embedding: embedding
+            })
+          });
+          
+          if (embeddingResponse.ok) {
+            successCount++;
+            addLog(`✓ Successfully embedded document ${document.document_id} (${embedding.length} dimensions)`);
+          } else {
+            const errorResult = await embeddingResponse.json();
+            addLog(`✗ Failed to store embedding for ${document.document_id}: ${errorResult.error || 'Unknown error'}`);
+            errorCount++;
+          }
+
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+          addLog(`✗ Error embedding document ${document.document_id}: ${errorMessage}`);
+          errorCount++;
+        }
+
+        // Small delay to avoid overwhelming the embedding service
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      addLog(`=== DOCUMENT EMBEDDING COMPLETE ===`);
+      addLog(`Successfully embedded: ${successCount} documents`);
+      addLog(`Errors: ${errorCount} documents`);
+      
+      if (errorCount > 0) {
+        setEmbeddingError(`${errorCount} documents failed to embed. Check console logs for details.`);
+      }
+
+      // Reload data to get updated embeddings
+      await loadData();
+
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      addLog(`Error in document embedding process: ${errorMessage}`);
+      setEmbeddingError(errorMessage);
+    } finally {
+      setIsEmbeddingDocuments(false);
+      setDocumentEmbeddingProgress({ current: 0, total: 0 });
+    }
+  };
+
+  const loadData = async () => {
+    setIsLoading(true);
+    setError(null);
+    addLog('=== LOADING DASHBOARD DATA ===');
+    
     try {
       // Load persona data
-      const savedPersona = localStorage.getItem('navi-persona-data');
-      addLog(`Persona data from localStorage: ${savedPersona ? 'Found' : 'Not found'}`);
-      if (savedPersona) {
-        const parsedPersona = JSON.parse(savedPersona);
-        setPersona(parsedPersona);
-        addLog(`Loaded persona data: ${JSON.stringify(parsedPersona)}`);
-        addLog(`Persona interests: ${parsedPersona.interests ? parsedPersona.interests.join(', ') : 'None'}`);
-        addLog(`Persona role: ${parsedPersona.role || 'None'}`);
+      addLog('Loading persona data...');
+      const personaResponse = await fetch('http://localhost:8001/personas');
+      if (personaResponse.ok) {
+        const personas = await personaResponse.json();
+        if (personas.length > 0) {
+          setPersona(personas[0]);
+          addLog(`Loaded persona: ${personas[0].name || 'Unnamed'} (ID: ${personas[0].id})`);
+        } else {
+          addLog('No persona found in database');
+        }
       } else {
-        addLog('No persona data found in localStorage');
+        addLog('Failed to load persona data');
       }
 
-      // Load API data
-      const savedApiData = localStorage.getItem('navi-regulations-data');
-      addLog(`API data from localStorage: ${savedApiData ? 'Found' : 'Not found'}`);
-      if (savedApiData) {
-        const parsedApiData = JSON.parse(savedApiData);
-        loadSplitData(parsedApiData);
-        addLog(`API data saved at: ${parsedApiData._saved_at || 'Unknown time'}`);
+      // Load all documents (we'll filter for embeddings in semantic matching)
+      addLog('Loading documents...');
+      const documentsResponse = await fetch('http://localhost:8001/documents?limit=1000');
+      if (documentsResponse.ok) {
+        const documentsData = await documentsResponse.json();
+        setDocuments(documentsData);
+        const documentsWithEmbeddings = documentsData.filter((doc: DocumentData) => 
+          doc.embedding && doc.embedding.length > 0
+        );
+        addLog(`Loaded ${documentsData.length} total documents, ${documentsWithEmbeddings.length} with embeddings`);
       } else {
-        addLog('No API data found in localStorage');
+        addLog('Failed to load documents data');
       }
 
-      // Load saved relevant boards
-      const savedRelevantBoards = localStorage.getItem('navi-relevant-boards');
-      addLog(`Relevant boards from localStorage: ${savedRelevantBoards ? 'Found' : 'Not found'}`);
-      if (savedRelevantBoards) {
-        const parsedRelevantBoards = JSON.parse(savedRelevantBoards);
-        setRelevantBoards(parsedRelevantBoards.boards || []);
-        setLastAnalysis(parsedRelevantBoards.lastAnalysis || null);
-        addLog(`Loaded ${parsedRelevantBoards.boards ? parsedRelevantBoards.boards.length : 0} relevant boards`);
-        addLog(`Last analysis: ${parsedRelevantBoards.lastAnalysis || 'Unknown'}`);
-      } else {
-        addLog('No relevant boards found in localStorage');
-      }
     } catch (err) {
-      addLog(`ERROR LOADING DATA: ${err instanceof Error ? err.message : String(err)}`);
-      console.error('=== ERROR LOADING DATA ===');
-      console.error('Error type:', typeof err);
-      console.error('Error message:', err instanceof Error ? err.message : String(err));
-      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack trace');
-      console.error('Full error object:', err);
-    }
-    addLog('=== LOADING DATA END ===');
-  };
-
-  const refreshData = () => {
-    addLog('=== REFRESHING DATA ===');
-    loadData();
-    addLog('Data refresh completed');
-  };
-
-  const saveRelevantBoards = (boards: CommentBoard[], analysisTime: string) => {
-    try {
-      const dataToSave = {
-        boards: boards,
-        lastAnalysis: analysisTime,
-        savedAt: new Date().toISOString()
-      };
-      localStorage.setItem('navi-relevant-boards', JSON.stringify(dataToSave));
-      addLog(`Saved ${boards.length} relevant boards to localStorage`);
-    } catch (err) {
-      addLog(`ERROR SAVING RELEVANT BOARDS: ${err instanceof Error ? err.message : String(err)}`);
-      console.error('Error saving relevant boards:', err);
-    }
-  };
-
-  const matchDocumentsWithEmbeddings = async () => {
-    if (!persona || !embeddingData) return;
-
-    setIsMatchingEmbeddings(true);
-    setAnalysisError(null);
-
-    try {
-      addLog('=== EMBEDDING MATCHING START ===');
-      addLog(`Persona data: ${JSON.stringify(persona)}`);
-      addLog(`Embedding data count: ${embeddingData.count}`);
-      addLog(`Embedding items: ${embeddingData.items.length}`);
-      
-      // Create a prompt for Ollama to match documents using embeddings
-      const prompt = createEmbeddingMatchingPrompt(persona, embeddingData.items);
-      
-      addLog(`=== EMBEDDING MATCHING PROMPT ===`);
-      addLog(`Prompt length: ${prompt.length}`);
-      addLog(`Full prompt: ${prompt}`);
-      
-      // Get Ollama configuration from localStorage or use defaults
-      const host = '10.0.4.52';
-      const port = '11434';
-      const model = 'gpt-oss:20b';
-      
-      const url = `http://${host}:${port}/api/generate`;
-      const payload = {
-        model: model,
-        prompt: prompt,
-        stream: false
-      };
-
-      addLog(`=== OLLAMA REQUEST DETAILS ===`);
-      addLog(`URL: ${url}`);
-      addLog(`Model: ${model}`);
-
-      addLog('Sending embedding matching request to Ollama...');
-      
-      let response;
-      try {
-        // Try Tauri HTTP client first
-        addLog('Trying Tauri HTTP client...');
-        response = await tauriFetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        });
-        addLog('Tauri HTTP client succeeded');
-      } catch (tauriError) {
-        addLog(`Tauri HTTP client failed, trying browser fetch... ${tauriError}`);
-        // Fallback to browser fetch
-        response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        });
-        addLog('Browser fetch succeeded');
-      }
-
-      addLog(`=== OLLAMA RESPONSE ===`);
-      addLog(`Response status: ${response.status}`);
-      addLog(`Response ok: ${response.ok}`);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        addLog(`Error response body: ${errorText}`);
-        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
-      }
-
-      const data = await response.json();
-      addLog(`=== OLLAMA RESPONSE DATA ===`);
-      addLog(`Response: ${data.response}`);
-      
-      // Parse the matched document IDs
-      addLog(`=== PARSING MATCHED DOCUMENTS ===`);
-      const matchedIds = parseMatchedDocumentIds(data.response);
-      addLog(`Matched document IDs: ${JSON.stringify(matchedIds)}`);
-      
-      setMatchedDocumentIds(matchedIds);
-      
-      addLog(`=== EMBEDDING MATCHING COMPLETED ===`);
-      addLog(`Found ${matchedIds.length} matching documents`);
-      
-    } catch (err) {
-      addLog(`=== EMBEDDING MATCHING ERROR ===`);
-      addLog(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      console.error('=== EMBEDDING MATCHING ERROR ===');
-      console.error('Error type:', typeof err);
-      console.error('Error message:', err instanceof Error ? err.message : String(err));
-      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack trace');
-      
-      setAnalysisError(err instanceof Error ? err.message : 'Failed to match documents with embeddings');
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      addLog(`Error loading data: ${errorMessage}`);
+      setError(errorMessage);
     } finally {
-      setIsMatchingEmbeddings(false);
-      addLog('=== EMBEDDING MATCHING END ===');
+      setIsLoading(false);
+      addLog('=== DATA LOADING COMPLETE ===');
     }
   };
 
-  const analyzeRelevance = async () => {
-    if (!persona || !apiData) return;
+  const performSemanticMatching = async (threshold: number = 0.5) => {
+    if (!persona || !persona.embedding || documents.length === 0) {
+      setError('Missing persona embedding or documents. Please ensure persona has been embedded and documents are loaded.');
+      return;
+    }
 
-    setIsAnalyzing(true);
-    setAnalysisError(null);
+    setIsLoading(true);
+    setError(null);
+    addLog(`=== PERFORMING SEMANTIC MATCHING (threshold: ${threshold}) ===`);
 
     try {
-      addLog('=== RELEVANCE ANALYSIS START ===');
-      addLog(`Persona data: ${JSON.stringify(persona)}`);
-      addLog(`API data count: ${apiData.count}`);
-      addLog(`API data items: ${apiData.items.length}`);
-      
-      // Create a prompt for Ollama to analyze relevance
-      const prompt = createAnalysisPrompt(persona, apiData.items.map(item => item.data));
-      
-      addLog(`=== PROMPT SENT TO OLLAMA ===`);
-      addLog(`Prompt length: ${prompt.length}`);
-      addLog(`Full prompt: ${prompt}`);
-      
-      // Get Ollama configuration from localStorage or use defaults
-      const host = '10.0.4.52';
-      const port = '11434';
-      const model = 'gpt-oss:20b';
-      
-      const url = `http://${host}:${port}/api/generate`;
-      const payload = {
-        model: model,
-        prompt: prompt,
-        stream: false
-      };
+      const personaEmbedding = persona.embedding;
+      addLog(`Persona embedding dimensions: ${personaEmbedding.length}`);
 
-      addLog(`=== OLLAMA REQUEST DETAILS ===`);
-      addLog(`URL: ${url}`);
-      addLog(`Model: ${model}`);
-      addLog(`Payload: ${JSON.stringify(payload)}`);
-
-      addLog('Sending analysis request to Ollama...');
+      // Filter documents that have embeddings
+      const documentsWithEmbeddings = documents.filter(doc => 
+        doc.embedding && doc.embedding.length > 0
+      );
       
-      let response;
-      try {
-        // Try Tauri HTTP client first
-        addLog('Trying Tauri HTTP client...');
-        response = await tauriFetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        });
-        addLog('Tauri HTTP client succeeded');
-      } catch (tauriError) {
-        addLog(`Tauri HTTP client failed, trying browser fetch... ${tauriError}`);
-        // Fallback to browser fetch
-        response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        });
-        addLog('Browser fetch succeeded');
+      if (documentsWithEmbeddings.length === 0) {
+        setError('No documents with embeddings found. Please embed documents first.');
+        return;
       }
 
-      addLog(`=== OLLAMA RESPONSE ===`);
-      addLog(`Response status: ${response.status}`);
-      addLog(`Response ok: ${response.ok}`);
+      addLog(`Found ${documentsWithEmbeddings.length} documents with embeddings`);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        addLog(`Error response body: ${errorText}`);
-        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      const matches: MatchedDocument[] = [];
+      const allSimilarities: {doc: DocumentData, similarity: number}[] = [];
+
+      for (const doc of documentsWithEmbeddings) {
+        // Type guard to ensure embedding exists
+        if (!doc.embedding || doc.embedding.length === 0) {
+          addLog(`Skipping document ${doc.document_id} - no embedding`);
+          continue;
+        }
+
+        // Check dimension compatibility
+        if (doc.embedding.length !== personaEmbedding.length) {
+          addLog(`Skipping document ${doc.document_id} - dimension mismatch (${doc.embedding.length} vs ${personaEmbedding.length})`);
+          continue;
+        }
+
+        // Calculate cosine similarity
+        const similarity = calculateCosineSimilarity(personaEmbedding, doc.embedding);
+        allSimilarities.push({doc, similarity});
+        
+        if (similarity >= threshold) { // Threshold for relevance
+          matches.push({
+            document: doc,
+            similarityScore: similarity,
+            relevanceReason: generateRelevanceReason(persona, doc, similarity)
+          });
+        }
       }
 
-      const data = await response.json();
-      addLog(`=== OLLAMA RESPONSE DATA ===`);
-      addLog(`Full response data: ${JSON.stringify(data)}`);
-      addLog(`Response type: ${typeof data}`);
-      addLog(`Response keys: ${Object.keys(data)}`);
-      addLog(`Response.response: ${data.response}`);
-      addLog(`Response.response type: ${typeof data.response}`);
-      addLog(`Response.response length: ${data.response ? data.response.length : 'N/A'}`);
+      // Sort all similarities to show top scores
+      allSimilarities.sort((a, b) => b.similarity - a.similarity);
+      addLog(`Top 10 similarity scores: ${allSimilarities.slice(0, 10).map(s => `${s.doc.title.substring(0, 30)}... (${s.similarity.toFixed(4)})`).join(', ')}`);
+      addLog(`Similarity range: ${allSimilarities[allSimilarities.length-1]?.similarity.toFixed(4)} to ${allSimilarities[0]?.similarity.toFixed(4)}`);
+
+      // Sort by similarity score (highest first)
+      matches.sort((a, b) => b.similarityScore - a.similarityScore);
       
-      // Parse the analysis results
-      addLog(`=== PARSING ANALYSIS RESULTS ===`);
-      const analysisResults = parseAnalysisResults(data.response, apiData.items.map(item => item.data));
-      addLog(`Parsed analysis results: ${JSON.stringify(analysisResults)}`);
-      addLog(`Number of relevant boards found: ${analysisResults.length}`);
-      
-      const analysisTime = new Date().toISOString();
-      setRelevantBoards(analysisResults);
-      setLastAnalysis(analysisTime);
-      
-      // Save the results to localStorage
-      saveRelevantBoards(analysisResults, analysisTime);
-      
-      addLog(`=== ANALYSIS COMPLETED ===`);
-      addLog(`Final relevant boards: ${analysisResults.length} boards`);
-      
+      setMatchedDocuments(matches);
+      addLog(`Found ${matches.length} relevant documents above threshold ${threshold}`);
+      addLog(`Top matches: ${matches.slice(0, 3).map(m => `${m.document.title} (${m.similarityScore.toFixed(3)})`).join(', ')}`);
+
     } catch (err) {
-      addLog(`=== ANALYSIS ERROR ===`);
-      addLog(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      console.error('=== ANALYSIS ERROR ===');
-      console.error('Error type:', typeof err);
-      console.error('Error constructor:', err?.constructor?.name);
-      console.error('Error message:', err instanceof Error ? err.message : String(err));
-      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack trace');
-      console.error('Full error object:', err);
-      
-      setAnalysisError(err instanceof Error ? err.message : 'Failed to analyze relevance');
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      addLog(`Error in semantic matching: ${errorMessage}`);
+      setError(errorMessage);
     } finally {
-      setIsAnalyzing(false);
-      addLog('=== RELEVANCE ANALYSIS END ===');
+      setIsLoading(false);
+      addLog('=== SEMANTIC MATCHING COMPLETE ===');
     }
   };
 
-  const createEmbeddingMatchingPrompt = (persona: PersonaData, embeddingItems: Array<{documentId: string, title: string, embedding: number[], webCommentLink?: string, webDocumentLink?: string, webDocketLink?: string}>): string => {
-    const personaInfo = `
-Persona Information:
-- Name: ${persona.name || 'Not specified'}
-- Role: ${persona.role || 'Not specified'}
-- Interests: ${persona.interests ? persona.interests.join(', ') : 'Not specified'}
-`;
-
-    const embeddingInfo = embeddingItems.map((item, index) => `
-${index + 1}. Title: ${item.title}
-   Document ID: ${item.documentId}
-   Embedding: [${item.embedding.slice(0, 10).join(', ')}...] (${item.embedding.length} dimensions)
-   ${item.webCommentLink ? `Comment Link: ${item.webCommentLink}` : ''}
-   ${item.webDocumentLink ? `Document Link: ${item.webDocumentLink}` : ''}
-   ${item.webDocketLink ? `Docket Link: ${item.webDocketLink}` : ''}
-`).join('\n');
-
-    return `
-You are an AI assistant that matches regulatory documents to user personas using semantic embeddings.
-
-${personaInfo}
-
-Available Documents with Embeddings:
-${embeddingInfo}
-
-Task: Analyze the semantic similarity between the persona's interests/role and each document's embedding vector. The embeddings represent the semantic content of each document.
-
-Instructions:
-1. Consider the persona's role, interests, and background
-2. Use the embedding vectors to understand the semantic content of each document
-3. Identify documents that would be most relevant to this persona
-4. Return only the document IDs of documents that match well (relevance score >= 6/10)
-
-Respond in JSON format with this structure:
-{
-  "matched_document_ids": [
-    "FCC-2025-1275-0001",
-    "EPA-2025-001-0001"
-  ]
-}
-
-Be selective - only include documents that would genuinely interest this persona based on their profile and the semantic content represented by the embeddings.
-`;
-  };
-
-  const createAnalysisPrompt = (persona: PersonaData, boards: CommentBoard[]): string => {
-    const personaInfo = `
-Persona Information:
-- Name: ${persona.name || 'Not specified'}
-- Role: ${persona.role || 'Not specified'}
-- Interests: ${persona.interests ? persona.interests.join(', ') : 'Not specified'}
-`;
-
-    const boardsInfo = boards.map((board, index) => `
-${index + 1}. ${board.title}
-   Agency: ${board.agencyId}
-   Type: ${board.documentType}
-   Document ID: ${board.documentId}
-   Docket ID: ${board.docketId || 'N/A'}
-   Content: ${board.content.substring(0, 500)}...
-`).join('\n');
-
-    return `
-You are a civic engagement assistant. Analyze the following regulatory documents and identify which ones would be most relevant and interesting to the given persona.
-
-${personaInfo}
-
-Available Regulatory Documents:
-${boardsInfo}
-
-For each document, determine:
-1. Relevance score (0-10, where 10 is highly relevant)
-2. Brief reason for relevance
-
-Respond in JSON format with this structure:
-{
-  "relevant_boards": [
-    {
-      "index": 1,
-      "relevance_score": 8,
-      "relevance_reason": "Directly relates to healthcare policy which aligns with the persona's interests"
+  const calculateCosineSimilarity = (vecA: number[], vecB: number[]): number => {
+    if (vecA.length !== vecB.length) {
+      throw new Error('Vectors must have the same length');
     }
-  ]
-}
-
-Only include documents with relevance score >= 6. Be selective and focus on the most relevant opportunities for civic engagement.
-`;
-  };
-
-  const parseMatchedDocumentIds = (ollamaResponse: string): string[] => {
-    addLog('=== PARSING MATCHED DOCUMENT IDS START ===');
-    addLog(`Raw Ollama response: ${ollamaResponse}`);
     
-    try {
-      // Try to extract JSON from the response
-      addLog('Looking for JSON pattern in response...');
-      const jsonMatch = ollamaResponse.match(/\{[\s\S]*\}/);
-      addLog(`JSON match found: ${!!jsonMatch}`);
-      
-      if (!jsonMatch) {
-        addLog('No JSON pattern found in response');
-        throw new Error('No JSON found in response');
-      }
-
-      addLog(`Extracted JSON string: ${jsonMatch[0]}`);
-      const analysis = JSON.parse(jsonMatch[0]);
-      addLog(`Parsed analysis object: ${JSON.stringify(analysis)}`);
-      
-      if (analysis.matched_document_ids && Array.isArray(analysis.matched_document_ids)) {
-        addLog(`Found ${analysis.matched_document_ids.length} matched document IDs`);
-        return analysis.matched_document_ids;
-      } else {
-        addLog('No matched_document_ids array found in analysis');
-        return [];
-      }
-    } catch (err) {
-      addLog(`=== PARSING MATCHED DOCUMENT IDS ERROR ===`);
-      addLog(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      return [];
-    }
-  };
-
-  const parseAnalysisResults = (ollamaResponse: string, boards: CommentBoard[]): CommentBoard[] => {
-    addLog('=== PARSING ANALYSIS RESULTS START ===');
-    addLog(`Raw Ollama response: ${ollamaResponse}`);
-    addLog(`Response type: ${typeof ollamaResponse}`);
-    addLog(`Response length: ${ollamaResponse ? ollamaResponse.length : 'N/A'}`);
-    addLog(`Available boards count: ${boards.length}`);
+    const dotProduct = vecA.reduce((sum, a, i) => sum + a * vecB[i], 0);
+    const magnitudeA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
+    const magnitudeB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0));
     
-    try {
-      // Try to extract JSON from the response
-      addLog('Looking for JSON pattern in response...');
-      const jsonMatch = ollamaResponse.match(/\{[\s\S]*\}/);
-      addLog(`JSON match found: ${!!jsonMatch}`);
-      
-      if (!jsonMatch) {
-        addLog('No JSON pattern found in response');
-        addLog(`Response preview (first 500 chars): ${ollamaResponse.substring(0, 500)}`);
-        throw new Error('No JSON found in response');
-      }
-
-      addLog(`Extracted JSON string: ${jsonMatch[0]}`);
-      const analysis = JSON.parse(jsonMatch[0]);
-      addLog(`Parsed analysis object: ${JSON.stringify(analysis)}`);
-      addLog(`Analysis keys: ${Object.keys(analysis)}`);
-      
-      const relevantBoards: CommentBoard[] = [];
-
-      if (analysis.relevant_boards && Array.isArray(analysis.relevant_boards)) {
-        addLog(`Found relevant_boards array with ${analysis.relevant_boards.length} items`);
-        analysis.relevant_boards.forEach((item: any, index: number) => {
-          addLog(`Processing relevant board ${index + 1}: ${JSON.stringify(item)}`);
-          const boardIndex = item.index - 1; // Convert to 0-based index
-          addLog(`Board index: ${item.index} -> array index: ${boardIndex}`);
-          
-          if (boardIndex >= 0 && boardIndex < boards.length) {
-            const board = { ...boards[boardIndex] };
-            board.relevanceScore = item.relevance_score;
-            board.relevanceReason = item.relevance_reason;
-            relevantBoards.push(board);
-            addLog(`Added board: ${board.title} (score: ${board.relevanceScore})`);
-          } else {
-            addLog(`Invalid board index: ${boardIndex} (boards length: ${boards.length})`);
-          }
-        });
-      } else {
-        addLog('No relevant_boards array found in analysis');
-        addLog(`Analysis structure: ${JSON.stringify(analysis)}`);
-      }
-
-      addLog(`Total relevant boards found: ${relevantBoards.length}`);
-      
-      // Sort by relevance score (highest first)
-      const sortedBoards = relevantBoards.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
-      addLog(`Sorted boards: ${JSON.stringify(sortedBoards.map(b => ({ title: b.title, score: b.relevanceScore })))}`);
-      
-      addLog('=== PARSING ANALYSIS RESULTS SUCCESS ===');
-      return sortedBoards;
-    } catch (err) {
-      addLog(`=== PARSING ANALYSIS RESULTS ERROR ===`);
-      addLog(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      console.error('=== PARSING ANALYSIS RESULTS ERROR ===');
-      console.error('Error type:', typeof err);
-      console.error('Error message:', err instanceof Error ? err.message : String(err));
-      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack trace');
-      console.error('Full error object:', err);
-      
-      // Fallback: return first few boards if parsing fails
-      const fallbackBoards = boards.slice(0, 3).map(board => ({
-        ...board,
-        relevanceScore: 5,
-        relevanceReason: 'Analysis parsing failed - showing sample boards'
-      }));
-      addLog(`Returning fallback boards: ${fallbackBoards.length}`);
-      return fallbackBoards;
+    if (magnitudeA === 0 || magnitudeB === 0) {
+      return 0;
     }
+    
+    return dotProduct / (magnitudeA * magnitudeB);
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
+  const generateRelevanceReason = (persona: PersonaData, doc: DocumentData, similarity: number): string => {
+    const reasons = [];
+    
+    // Check for agency match
+    if (doc.agency_id && persona.preferred_agencies?.some(agency => 
+      agency.toLowerCase().includes(doc.agency_id!.toLowerCase()) || 
+      doc.agency_id!.toLowerCase().includes(agency.toLowerCase())
+    )) {
+      reasons.push(`matches your preferred agency (${doc.agency_id})`);
+    }
+    
+    // Check for policy interest match
+    const docText = `${doc.title} ${doc.content || ''}`.toLowerCase();
+    const matchingInterests = persona.policy_interests?.filter(interest => 
+      docText.includes(interest.toLowerCase())
+    ) || [];
+    if (matchingInterests.length > 0) {
+      reasons.push(`relates to your policy interests: ${matchingInterests.join(', ')}`);
+    }
+    
+    // Check for role/industry relevance
+    if (persona.role && docText.includes(persona.role.toLowerCase())) {
+      reasons.push(`directly relates to your role as ${persona.role}`);
+    }
+    
+    if (persona.industry && docText.includes(persona.industry.toLowerCase())) {
+      reasons.push(`affects your industry: ${persona.industry}`);
+    }
+    
+    // Default reason based on similarity score
+    if (reasons.length === 0) {
+      if (similarity > 0.9) {
+        reasons.push('highly semantically similar to your profile');
+      } else if (similarity > 0.8) {
+        reasons.push('very relevant to your interests and background');
+      } else {
+        reasons.push('semantically relevant to your profile');
+      }
+    }
+    
+    return reasons.join(', ');
+  };
+
+  // Function to call GPT-OSS:20b for reasoning
+  const getGPTReasoning = async (persona: PersonaData, document: DocumentData): Promise<GPTReasoningResult> => {
+    // Get GPT configuration from localStorage
+    const gptHost = localStorage.getItem('gptHost') || '10.0.4.52';
+    const gptPort = localStorage.getItem('gptPort') || '11434';
+    const gptModel = localStorage.getItem('gptModel') || 'gpt-oss:20b';
+    
+    const url = `http://${gptHost}:${gptPort}/api/generate`;
+    
+    // Prepare persona text (non-embedded version)
+    const personaText = preparePersonaForEmbedding(persona);
+    
+    // Prepare document text
+    const documentText = `${document.title}\n\n${document.content || ''}`.trim();
+    
+    const prompt = `You are an AI assistant analyzing government document relevance. 
+
+PERSONA PROFILE:
+${personaText}
+
+DOCUMENT TO ANALYZE:
+Title: ${document.title}
+Agency: ${document.agency_id || 'Unknown'}
+Type: ${document.document_type || 'Unknown'}
+Content: ${documentText}
+
+TASK: Analyze how relevant this document is to the persona above. Provide:
+1. A relevance score from 1-10 (10 = highly relevant, 1 = not relevant)
+2. Your reasoning for the score
+3. Your thought process (step-by-step analysis)
+
+IMPORTANT: Use the special thought process format. Start your thought process with "THOUGHT_PROCESS:" and end with "END_THOUGHT_PROCESS:". This allows extraction of your reasoning steps.
+
+RESPONSE FORMAT:
+Relevance Score: [1-10]
+Reasoning: [Your explanation]
+THOUGHT_PROCESS:
+[Your step-by-step analysis]
+END_THOUGHT_PROCESS:`;
+
+    const payload = {
+      model: gptModel,
+      prompt: prompt,
+      stream: false,
+      options: {
+        temperature: 0.7,
+        top_p: 0.9,
+        max_tokens: 1000
+      }
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload)
     });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    const result = await response.json();
+    const responseText = result.response || '';
+
+    // Parse the response
+    const scoreMatch = responseText.match(/Relevance Score:\s*(\d+)/i);
+    const reasoningMatch = responseText.match(/Reasoning:\s*([^]*?)(?=THOUGHT_PROCESS:|$)/i);
+    const thoughtProcessMatch = responseText.match(/THOUGHT_PROCESS:\s*([^]*?)END_THOUGHT_PROCESS:/i);
+
+    const relevanceScore = scoreMatch ? parseInt(scoreMatch[1]) : 5;
+    const reasoning = reasoningMatch ? reasoningMatch[1].trim() : 'No reasoning provided';
+    const thoughtProcess = thoughtProcessMatch ? thoughtProcessMatch[1].trim() : 'No thought process provided';
+
+    return {
+      relevanceScore: Math.max(1, Math.min(10, relevanceScore)), // Clamp between 1-10
+      reasoning: reasoning,
+      thoughtProcess: thoughtProcess
+    };
   };
 
-  const getDaysUntilDeadline = (endDate: string) => {
-    const now = new Date();
-    const deadline = new Date(endDate);
-    const diffTime = deadline.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
+  // Function to generate GPT reasoning for all matched documents
+  const generateGPTReasoning = async () => {
+    if (matchedDocuments.length === 0) {
+      setEmbeddingError('No matched documents found. Please perform semantic matching first.');
+      return;
+    }
+
+    if (!persona) {
+      setEmbeddingError('No persona found. Please configure your persona first.');
+      return;
+    }
+
+    setIsGeneratingReasoning(true);
+    setShouldStopReasoning(false);
+    setEmbeddingError(null);
+    setReasoningProgress({ current: 0, total: matchedDocuments.length });
+    addLog('=== GENERATING GPT REASONING ===');
+
+    try {
+      const updatedMatches = [...matchedDocuments];
+
+      for (let i = 0; i < matchedDocuments.length; i++) {
+        // Check if user wants to stop
+        if (shouldStopReasoning) {
+          addLog('GPT analysis stopped by user');
+          break;
+        }
+
+        const match = matchedDocuments[i];
+        setReasoningProgress({ current: i + 1, total: matchedDocuments.length });
+        
+        addLog(`Analyzing document ${i + 1}/${matchedDocuments.length}: ${match.document.title.substring(0, 50)}...`);
+
+        try {
+          const gptResult = await getGPTReasoning(persona, match.document);
+          updatedMatches[i].gptReasoning = gptResult;
+          
+          addLog(`✓ GPT analysis complete for ${match.document.document_id}: Score ${gptResult.relevanceScore}/10`);
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+          addLog(`✗ Error analyzing ${match.document.document_id}: ${errorMessage}`);
+          
+          // Add error result
+          updatedMatches[i].gptReasoning = {
+            relevanceScore: 0,
+            reasoning: `Error: ${errorMessage}`,
+            thoughtProcess: 'Analysis failed'
+          };
+        }
+
+        // Small delay to avoid overwhelming the GPT service
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      setMatchedDocuments(updatedMatches);
+      addLog(`=== GPT REASONING COMPLETE ===`);
+      addLog(`Successfully analyzed ${updatedMatches.filter(m => m.gptReasoning && m.gptReasoning.relevanceScore > 0).length} documents`);
+
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      addLog(`Error in GPT reasoning process: ${errorMessage}`);
+      setEmbeddingError(errorMessage);
+    } finally {
+      setIsGeneratingReasoning(false);
+      setReasoningProgress({ current: 0, total: 0 });
+    }
   };
 
-  // generateRelevanceReasoning function removed - not needed with embedding-only approach
 
   // Comment drafting functions
   const handleStartComment = (documentId: string, documentTitle: string) => {
@@ -668,7 +693,6 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
 
   const handleCommentSubmitted = (commentId: string) => {
     addLog(`Comment submitted successfully: ${commentId}`);
-    // Could refresh data or show success message here
   };
 
   return (
@@ -686,7 +710,7 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
       }}>
         <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700 }}>Dashboard</h1>
         <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: '#B8B8B8' }}>
-          Personalized civic engagement opportunities
+          Semantic matching between your persona and government documents
         </p>
       </div>
       
@@ -712,10 +736,10 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
                 width: 8, 
                 height: 8, 
                 borderRadius: '50%', 
-                background: persona ? '#4CAF50' : '#FF6B6B' 
+                background: persona ? (persona.embedding ? '#4CAF50' : '#FFA726') : '#FF6B6B' 
               }} />
               <span style={{ fontSize: '14px', color: '#B8B8B8' }}>
-                Persona: {persona ? 'Configured' : 'Not configured'}
+                Persona: {persona ? `${persona.name || 'Unnamed'} (${persona.embedding ? 'Embedded' : 'Needs Embedding'})` : 'Not found'}
               </span>
             </div>
             
@@ -724,21 +748,14 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
                 width: 8, 
                 height: 8, 
                 borderRadius: '50%', 
-                background: (apiData || embeddingData) ? '#4CAF50' : '#FF6B6B' 
+                background: documents.length > 0 ? '#4CAF50' : '#FF6B6B' 
               }} />
               <span style={{ fontSize: '14px', color: '#B8B8B8' }}>
-                API Data: {apiData ? `${apiData.count} items` : 
-                          embeddingData ? `${embeddingData.count} embeddings` : 
-                          'Not loaded'}
-                {(apiData || embeddingData) && (apiData?._saved_at || embeddingData?._saved_at) && (
-                  <span style={{ color: '#666', marginLeft: 8 }}>
-                    (saved {new Date(apiData?._saved_at || embeddingData?._saved_at || '').toLocaleString()})
-                  </span>
-                )}
+                Documents: {documents.length} total, {documents.filter(d => d.embedding && d.embedding.length > 0).length} with embeddings
               </span>
             </div>
             
-            {matchedDocumentIds.length > 0 && (
+            {matchedDocuments.length > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ 
                   width: 8, 
@@ -747,120 +764,161 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
                   background: '#4CAF50' 
                 }} />
                 <span style={{ fontSize: '14px', color: '#B8B8B8' }}>
-                  Matched Documents: {matchedDocumentIds.length} found
-                </span>
-              </div>
-            )}
-            
-            {lastAnalysis && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ 
-                  width: 8, 
-                  height: 8, 
-                  borderRadius: '50%', 
-                  background: '#4CAF50' 
-                }} />
-                <span style={{ fontSize: '14px', color: '#B8B8B8' }}>
-                  Last analyzed: {new Date(lastAnalysis).toLocaleString()}
+                  Matches: {matchedDocuments.length} found
                 </span>
               </div>
             )}
           </div>
 
-          {isAnalyzing && (
-            <div style={{ marginTop: 16, color: '#FFA726', fontSize: '14px' }}>
-              🔄 Analyzing relevance with AI...
-            </div>
-          )}
-
-          {!isAnalyzing && relevantBoards.length > 0 && persona && apiData && (
-            <div style={{ marginTop: 16, color: '#4CAF50', fontSize: '14px' }}>
-              ✅ Analysis complete. Use "Re-analyze" button to refresh results.
-            </div>
-          )}
-
-          {analysisError && (
+          {error && (
             <div style={{ marginTop: 16, color: '#FF6B6B', fontSize: '14px' }}>
-              ❌ Analysis error: {analysisError}
+              ❌ Error: {error}
+            </div>
+          )}
+
+          {embeddingError && (
+            <div style={{ marginTop: 16, color: '#FF6B6B', fontSize: '14px' }}>
+              ❌ Embedding Error: {embeddingError}
             </div>
           )}
 
           {/* Action Buttons */}
           <div style={{ marginTop: 16, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <button
-              onClick={refreshData}
+              onClick={loadData}
+              disabled={isLoading}
               style={{
-                background: '#2A2A2A',
+                background: isLoading ? '#444' : '#2A2A2A',
                 color: '#B8B8B8',
                 border: '1px solid #444',
                 borderRadius: 6,
                 padding: '8px 16px',
                 fontSize: '14px',
-                cursor: 'pointer'
+                cursor: isLoading ? 'not-allowed' : 'pointer',
+                opacity: isLoading ? 0.5 : 1
               }}
             >
-              Refresh Data
+              {isLoading ? 'Loading...' : 'Refresh Data'}
             </button>
             
-            {embeddingData && (
               <button
-                onClick={matchDocumentsWithEmbeddings}
-                disabled={isMatchingEmbeddings || !persona || !embeddingData}
+              onClick={generateAndStorePersonaEmbedding}
+              disabled={isGeneratingEmbedding || !persona}
                 style={{
-                  background: isMatchingEmbeddings || !persona || !embeddingData ? '#444' : '#2A4A2A',
+                background: (isGeneratingEmbedding || !persona) ? '#444' : '#3C362A',
                   color: '#FAFAFA',
                   border: '1px solid #555',
                   borderRadius: 6,
                   padding: '8px 16px',
                   fontSize: '14px',
-                  cursor: isMatchingEmbeddings || !persona || !embeddingData ? 'not-allowed' : 'pointer',
-                  opacity: (isMatchingEmbeddings || !persona || !embeddingData) ? 0.5 : 1
+                cursor: (isGeneratingEmbedding || !persona) ? 'not-allowed' : 'pointer',
+                opacity: (isGeneratingEmbedding || !persona) ? 0.5 : 1
                 }}
               >
-                {isMatchingEmbeddings ? 'Matching...' : (matchedDocumentIds.length > 0 ? 'Re-match' : 'Match with Embeddings')}
+              {isGeneratingEmbedding ? 'Generating...' : 'Generate Persona Embedding'}
               </button>
-            )}
             
-            {apiData && (
               <button
-                onClick={analyzeRelevance}
-                disabled={isAnalyzing || !persona || !apiData}
+              onClick={embedAllDocuments}
+              disabled={isEmbeddingDocuments || documents.length === 0}
                 style={{
-                  background: isAnalyzing || !persona || !apiData ? '#444' : '#3C362A',
+                background: (isEmbeddingDocuments || documents.length === 0) ? '#444' : '#2A3C4A',
                   color: '#FAFAFA',
                   border: '1px solid #555',
                   borderRadius: 6,
                   padding: '8px 16px',
                   fontSize: '14px',
-                  cursor: isAnalyzing || !persona || !apiData ? 'not-allowed' : 'pointer',
-                  opacity: (isAnalyzing || !persona || !apiData) ? 0.5 : 1
+                cursor: (isEmbeddingDocuments || documents.length === 0) ? 'not-allowed' : 'pointer',
+                opacity: (isEmbeddingDocuments || documents.length === 0) ? 0.5 : 1
                 }}
               >
-                {isAnalyzing ? 'Analyzing...' : (relevantBoards.length > 0 ? 'Re-analyze' : 'Analyze')}
+              {isEmbeddingDocuments ? `Embedding... (${documentEmbeddingProgress.current}/${documentEmbeddingProgress.total})` : `Embed Documents (${documents.length})`}
               </button>
-            )}
             
-            {relevantBoards.length > 0 && (
               <button
-                onClick={() => {
-                  localStorage.removeItem('navi-relevant-boards');
-                  setRelevantBoards([]);
-                  setLastAnalysis(null);
-                  addLog('Cleared saved relevant boards');
-                }}
+              onClick={() => performSemanticMatching(0.5)}
+              disabled={isLoading || !persona?.embedding || documents.length === 0}
                 style={{
-                  background: '#6B2C2C',
+                background: (isLoading || !persona?.embedding || documents.length === 0) ? '#444' : '#2A4A2A',
                   color: '#FAFAFA',
-                  border: '1px solid #444',
+                border: '1px solid #555',
                   borderRadius: 6,
                   padding: '8px 16px',
                   fontSize: '14px',
-                  cursor: 'pointer'
+                cursor: (isLoading || !persona?.embedding || documents.length === 0) ? 'not-allowed' : 'pointer',
+                opacity: (isLoading || !persona?.embedding || documents.length === 0) ? 0.5 : 1
                 }}
               >
-                Clear Saved Results
+              {isLoading ? 'Matching...' : 'Semantic Match (5/10)'}
               </button>
-            )}
+            
+              <button
+              onClick={() => performSemanticMatching(0.4)}
+              disabled={isLoading || !persona?.embedding || documents.length === 0}
+                style={{
+                background: (isLoading || !persona?.embedding || documents.length === 0) ? '#444' : '#4A2A2A',
+                  color: '#FAFAFA',
+                border: '1px solid #555',
+                  borderRadius: 6,
+                  padding: '8px 16px',
+                  fontSize: '14px',
+                cursor: (isLoading || !persona?.embedding || documents.length === 0) ? 'not-allowed' : 'pointer',
+                opacity: (isLoading || !persona?.embedding || documents.length === 0) ? 0.5 : 1
+                }}
+              >
+              {isLoading ? 'Matching...' : 'Semantic Match (4/10)'}
+              </button>
+            
+              <button
+              onClick={() => performSemanticMatching(0.3)}
+              disabled={isLoading || !persona?.embedding || documents.length === 0}
+                style={{
+                background: (isLoading || !persona?.embedding || documents.length === 0) ? '#444' : '#2A2A4A',
+                  color: '#FAFAFA',
+                border: '1px solid #555',
+                  borderRadius: 6,
+                  padding: '8px 16px',
+                  fontSize: '14px',
+                cursor: (isLoading || !persona?.embedding || documents.length === 0) ? 'not-allowed' : 'pointer',
+                opacity: (isLoading || !persona?.embedding || documents.length === 0) ? 0.5 : 1
+                }}
+              >
+              {isLoading ? 'Matching...' : 'Semantic Match (3/10)'}
+              </button>
+            
+              <button
+              onClick={generateGPTReasoning}
+              disabled={isGeneratingReasoning || matchedDocuments.length === 0}
+                style={{
+                background: (isGeneratingReasoning || matchedDocuments.length === 0) ? '#444' : '#4A2A4A',
+                  color: '#FAFAFA',
+                border: '1px solid #555',
+                  borderRadius: 6,
+                  padding: '8px 16px',
+                  fontSize: '14px',
+                cursor: (isGeneratingReasoning || matchedDocuments.length === 0) ? 'not-allowed' : 'pointer',
+                opacity: (isGeneratingReasoning || matchedDocuments.length === 0) ? 0.5 : 1
+                }}
+              >
+              {isGeneratingReasoning ? `GPT Analysis... (${reasoningProgress.current}/${reasoningProgress.total})` : `GPT Reasoning (${matchedDocuments.length} docs)`}
+              </button>
+            
+              {isGeneratingReasoning && (
+                <button
+                  onClick={() => setShouldStopReasoning(true)}
+                  style={{
+                    background: '#6B2C2C',
+                    color: '#FAFAFA',
+                    border: '1px solid #444',
+                    borderRadius: 6,
+                    padding: '8px 16px',
+                    fontSize: '14px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Stop GPT Analysis
+                </button>
+              )}
           </div>
 
           {/* Console Logs Toggle */}
@@ -914,7 +972,7 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
               </h4>
               {consoleLogs.length === 0 ? (
                 <div style={{ color: '#666', fontSize: '12px', fontStyle: 'italic' }}>
-                  No logs yet. Navigate to Dashboard to see analysis logs.
+                  No logs yet.
                 </div>
               ) : (
                 <div style={{ fontFamily: 'monospace', fontSize: '11px', lineHeight: '1.4' }}>
@@ -934,217 +992,59 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
           )}
         </div>
 
-        {/* Matched Documents from Embeddings */}
-        {matchedDocumentIds.length > 0 && (
+        {/* Matched Documents */}
+        {matchedDocuments.length > 0 && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>
-                Matched Documents ({matchedDocumentIds.length})
+                Semantically Matched Documents ({matchedDocuments.length})
               </h3>
-              <button
-                onClick={matchDocumentsWithEmbeddings}
-                disabled={isMatchingEmbeddings || !persona || !embeddingData}
-                style={{
-                  background: isMatchingEmbeddings || !persona || !embeddingData ? '#444' : '#2A4A2A',
-                  color: '#FAFAFA',
-                  border: '1px solid #555',
-                  borderRadius: 6,
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                  cursor: isMatchingEmbeddings || !persona || !embeddingData ? 'not-allowed' : 'pointer',
-                  opacity: (isMatchingEmbeddings || !persona || !embeddingData) ? 0.5 : 1
-                }}
-              >
-                {isMatchingEmbeddings ? 'Re-matching...' : 'Re-match Documents'}
-              </button>
             </div>
             
             <div style={{ display: 'grid', gap: 16 }}>
-              {matchedDocumentIds.map((documentId) => {
-                const embeddingDoc = embeddingData?.items.find(item => item.documentId === documentId);
-                return (
-                  <div key={documentId} style={{
-                    background: '#1A1A1A',
-                    border: '1px solid #333',
-                    borderRadius: 12,
-                    padding: 20,
-                    transition: 'all 0.2s ease'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = '#4CAF50';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = '#333';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
-                  >
-                    <div>
-                      <h4 style={{ 
-                        margin: '0 0 8px 0', 
-                        fontSize: '16px', 
-                        fontWeight: 600,
-                        lineHeight: '1.4'
-                      }}>
-                        {embeddingDoc?.title || `Document ${documentId}`}
-                      </h4>
-                      
-                      <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
-                        <span style={{ 
-                          background: '#2A4A2A', 
-                          color: '#4CAF50', 
-                          padding: '4px 8px', 
-                          borderRadius: 4, 
-                          fontSize: '12px' 
-                        }}>
-                          Matched via Embeddings
-                        </span>
-                      </div>
-
-                      <div style={{ fontSize: '14px', color: '#B8B8B8', marginBottom: 12 }}>
-                        Document ID: {documentId}
-                      </div>
-
-                      {/* Links directly in the card */}
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button
-                          onClick={() => handleStartComment(documentId, embeddingDoc?.title || `Document ${documentId}`)}
-                          style={{
-                            background: '#4CAF50',
-                            color: '#FAFAFA',
-                            border: 'none',
-                            padding: '8px 16px',
-                            borderRadius: 6,
-                            fontSize: '14px',
-                            fontWeight: 500,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Draft Comment
-                        </button>
-                        {embeddingDoc?.webCommentLink && (
-                          <a 
-                            href={embeddingDoc.webCommentLink} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            style={{
-                              background: '#3C362A',
-                              color: '#FAFAFA',
-                              padding: '8px 16px',
-                              borderRadius: 6,
-                              textDecoration: 'none',
-                              fontSize: '14px',
-                              fontWeight: 500
-                            }}
-                          >
-                            External Comment
-                          </a>
-                        )}
-                        {embeddingDoc?.webDocumentLink && (
-                          <a 
-                            href={embeddingDoc.webDocumentLink} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            style={{
-                              background: '#2A2A2A',
-                              color: '#B8B8B8',
-                              padding: '8px 16px',
-                              borderRadius: 6,
-                              textDecoration: 'none',
-                              fontSize: '14px',
-                              border: '1px solid #444'
-                            }}
-                          >
-                            View Details
-                          </a>
-                        )}
-                        {embeddingDoc?.webDocketLink && (
-                          <a 
-                            href={embeddingDoc.webDocketLink} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            style={{
-                              background: '#2A4A2A',
-                              color: '#4CAF50',
-                              padding: '8px 16px',
-                              borderRadius: 6,
-                              textDecoration: 'none',
-                              fontSize: '14px',
-                              fontWeight: 500
-                            }}
-                          >
-                            View Docket
-                          </a>
-                        )}
-                        {!embeddingDoc?.webCommentLink && !embeddingDoc?.webDocumentLink && !embeddingDoc?.webDocketLink && (
-                          <span style={{
-                            background: '#2A2A2A',
-                            color: '#666',
-                            padding: '8px 16px',
-                            borderRadius: 6,
-                            fontSize: '14px',
-                            border: '1px solid #444'
-                          }}>
-                            No links available
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Relevant Comment Boards */}
-        {relevantBoards.length > 0 && (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>
-                Relevant Comment Opportunities ({relevantBoards.length})
-              </h3>
-              <button
-                onClick={analyzeRelevance}
-                disabled={isAnalyzing || !persona || !apiData}
-                style={{
-                  background: isAnalyzing || !persona || !apiData ? '#444' : '#3C362A',
-                  color: '#FAFAFA',
-                  border: '1px solid #555',
-                  borderRadius: 6,
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                  cursor: isAnalyzing || !persona || !apiData ? 'not-allowed' : 'pointer',
-                  opacity: (isAnalyzing || !persona || !apiData) ? 0.5 : 1
-                }}
-              >
-                {isAnalyzing ? 'Re-analyzing...' : 'Re-analyze Results'}
-              </button>
-            </div>
-            
-            <div style={{ display: 'grid', gap: 16 }}>
-              {relevantBoards.map((board) => (
-                <div key={board.documentId} style={{
+              {matchedDocuments.map((match) => (
+                <div key={match.document.document_id} style={{
                   background: '#1A1A1A',
                   border: '1px solid #333',
                   borderRadius: 12,
                   padding: 20,
                   position: 'relative'
                 }}>
-                  {/* Relevance Score Badge */}
+                  {/* Similarity Score Badge */}
                   <div style={{
                     position: 'absolute',
                     top: 16,
                     right: 16,
-                    background: board.relevanceScore && board.relevanceScore >= 8 ? '#4CAF50' : 
-                               board.relevanceScore && board.relevanceScore >= 6 ? '#FFA726' : '#FF6B6B',
-                    color: '#FAFAFA',
-                    padding: '4px 8px',
-                    borderRadius: 6,
-                    fontSize: '12px',
-                    fontWeight: 600
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4
                   }}>
-                    {board.relevanceScore}/10
+                    <div style={{
+                      background: match.similarityScore >= 0.9 ? '#4CAF50' : 
+                                 match.similarityScore >= 0.8 ? '#FFA726' : '#FF6B6B',
+                      color: '#FAFAFA',
+                      padding: '4px 8px',
+                      borderRadius: 6,
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      textAlign: 'center'
+                    }}>
+                      Semantic: {(match.similarityScore * 10).toFixed(1)}/10
+                    </div>
+                    {match.gptReasoning && (
+                      <div style={{
+                        background: match.gptReasoning.relevanceScore >= 8 ? '#4CAF50' : 
+                                   match.gptReasoning.relevanceScore >= 6 ? '#FFA726' : '#FF6B6B',
+                        color: '#FAFAFA',
+                        padding: '4px 8px',
+                        borderRadius: 6,
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        textAlign: 'center'
+                      }}>
+                        GPT: {match.gptReasoning.relevanceScore}/10
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ marginRight: 80 }}>
@@ -1154,7 +1054,7 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
                       fontWeight: 600,
                       lineHeight: '1.4'
                     }}>
-                      {board.title}
+                      {match.document.title}
                     </h4>
                     
                     <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -1165,7 +1065,7 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
                         borderRadius: 4, 
                         fontSize: '12px' 
                       }}>
-                        {board.agencyId}
+                        {match.document.agency_id}
                       </span>
                       <span style={{ 
                         background: '#2A2A2A', 
@@ -1174,33 +1074,20 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
                         borderRadius: 4, 
                         fontSize: '12px' 
                       }}>
-                        {board.documentType}
+                        {match.document.document_type}
                       </span>
-                      {board.docketId && (
                         <span style={{ 
-                          background: '#2A2A2A', 
-                          color: '#B8B8B8', 
+                        background: '#2A4A2A', 
+                        color: '#4CAF50', 
                           padding: '4px 8px', 
                           borderRadius: 4, 
                           fontSize: '12px' 
                         }}>
-                          Docket: {board.docketId}
+                        Semantic Match
                         </span>
-                      )}
-                      {board.withinCommentPeriod !== undefined && (
-                        <span style={{ 
-                          background: board.withinCommentPeriod ? '#4CAF50' : '#FF6B6B', 
-                          color: '#FAFAFA', 
-                          padding: '4px 8px', 
-                          borderRadius: 4, 
-                          fontSize: '12px' 
-                        }}>
-                          {board.withinCommentPeriod ? 'Open for Comments' : 'Closed'}
-                        </span>
-                      )}
                     </div>
 
-                    {board.relevanceReason && (
+                    {match.relevanceReason && (
                       <div style={{ 
                         background: '#2A2A2A', 
                         padding: 12, 
@@ -1212,36 +1099,53 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
                           Why this is relevant:
                         </div>
                         <div style={{ fontSize: '14px', color: '#B8B8B8' }}>
-                          {board.relevanceReason}
+                          {match.relevanceReason}
                         </div>
+                      </div>
+                    )}
+
+                    {match.gptReasoning && (
+                      <div style={{ 
+                        background: '#2A2A2A', 
+                        padding: 12, 
+                        borderRadius: 8, 
+                        marginBottom: 12,
+                        borderLeft: '3px solid #FFA726'
+                      }}>
+                        <div style={{ fontSize: '12px', color: '#FFA726', fontWeight: 600, marginBottom: 4 }}>
+                          GPT Analysis (Score: {match.gptReasoning.relevanceScore}/10):
+                        </div>
+                        <div style={{ fontSize: '14px', color: '#B8B8B8', marginBottom: 8 }}>
+                          {match.gptReasoning.reasoning}
+                        </div>
+                        <details style={{ fontSize: '12px', color: '#888' }}>
+                          <summary style={{ cursor: 'pointer', color: '#FFA726', fontWeight: 600 }}>
+                            View Thought Process
+                          </summary>
+                          <div style={{ 
+                            marginTop: 8, 
+                            padding: 8, 
+                            background: '#1A1A1A', 
+                            borderRadius: 4,
+                            whiteSpace: 'pre-wrap',
+                            fontFamily: 'monospace',
+                            fontSize: '11px',
+                            lineHeight: '1.4'
+                          }}>
+                            {match.gptReasoning.thoughtProcess}
+                          </div>
+                        </details>
                       </div>
                     )}
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
                       <div style={{ fontSize: '14px', color: '#B8B8B8' }}>
-                        {board.commentEndDate ? (
-                          <>
-                            Comment deadline: {formatDate(board.commentEndDate)}
-                            {board.withinCommentPeriod && (
-                              <span style={{ 
-                                color: getDaysUntilDeadline(board.commentEndDate) <= 7 ? '#FF6B6B' : '#FFA726',
-                                fontWeight: 600,
-                                marginLeft: 8
-                              }}>
-                                ({getDaysUntilDeadline(board.commentEndDate)} days left)
-                              </span>
-                            )}
-                          </>
-                        ) : (
-                          <span style={{ color: '#666' }}>
-                            Document ID: {board.documentId}
-                          </span>
-                        )}
+                        Document ID: {match.document.document_id}
                       </div>
                       
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button
-                          onClick={() => handleStartComment(board.documentId, board.title)}
+                          onClick={() => handleStartComment(match.document.document_id, match.document.title)}
                           style={{
                             background: '#4CAF50',
                             color: '#FAFAFA',
@@ -1255,9 +1159,9 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
                         >
                           Draft Comment
                         </button>
-                        {board.webCommentLink && (
+                        {match.document.web_comment_link && (
                           <a 
-                            href={board.webCommentLink} 
+                            href={match.document.web_comment_link} 
                             target="_blank" 
                             rel="noopener noreferrer"
                             style={{
@@ -1273,9 +1177,9 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
                             External Comment
                           </a>
                         )}
-                        {board.webDocumentLink && (
+                        {match.document.web_document_link && (
                           <a 
-                            href={board.webDocumentLink} 
+                            href={match.document.web_document_link} 
                             target="_blank" 
                             rel="noopener noreferrer"
                             style={{
@@ -1290,18 +1194,6 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
                           >
                             View Details
                           </a>
-                        )}
-                        {!board.webCommentLink && !board.webDocumentLink && (
-                          <span style={{
-                            background: '#2A2A2A',
-                            color: '#666',
-                            padding: '8px 16px',
-                            borderRadius: 6,
-                            fontSize: '14px',
-                            border: '1px solid #444'
-                          }}>
-                            No links available
-                          </span>
                         )}
                       </div>
                     </div>
@@ -1323,12 +1215,12 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
           }}>
             <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 600 }}>Configure Your Persona</h3>
             <p style={{ color: '#B8B8B8', fontSize: '14px', margin: 0 }}>
-              Set up your persona in the "My Persona" section to get personalized comment board recommendations.
+              Set up your persona in the "My Persona" section and generate embeddings in Settings.
             </p>
           </div>
         )}
 
-        {persona && !apiData && (
+        {persona && !persona.embedding && (
           <div style={{ 
             background: '#1A1A1A', 
             border: '1px solid #333', 
@@ -1336,14 +1228,14 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
             padding: 24,
             textAlign: 'center'
           }}>
-            <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 600 }}>Load API Data</h3>
+            <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 600 }}>Generate Persona Embedding</h3>
             <p style={{ color: '#B8B8B8', fontSize: '14px', margin: 0 }}>
-              Go to Settings to fetch the latest comment board data from the API.
+              Go to Settings to generate an embedding for your persona before performing semantic matching.
             </p>
           </div>
         )}
 
-        {persona && apiData && relevantBoards.length === 0 && !isAnalyzing && (
+        {persona && persona.embedding && documents.length === 0 && (
           <div style={{ 
             background: '#1A1A1A', 
             border: '1px solid #333', 
@@ -1351,26 +1243,10 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
             padding: 24,
             textAlign: 'center'
           }}>
-            <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 600 }}>No Relevant Boards Found</h3>
-            <p style={{ color: '#B8B8B8', fontSize: '14px', margin: '0 0 16px 0' }}>
-              No comment boards were found that match your current persona interests. Try updating your interests or check back later for new opportunities.
+            <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 600 }}>No Documents with Embeddings</h3>
+            <p style={{ color: '#B8B8B8', fontSize: '14px', margin: 0 }}>
+              Upload documents with embeddings to the database to perform semantic matching.
             </p>
-            <button
-              onClick={analyzeRelevance}
-              disabled={isAnalyzing || !persona || !apiData}
-              style={{
-                background: isAnalyzing || !persona || !apiData ? '#444' : '#3C362A',
-                color: '#FAFAFA',
-                border: '1px solid #555',
-                borderRadius: 6,
-                padding: '8px 16px',
-                fontSize: '14px',
-                cursor: isAnalyzing || !persona || !apiData ? 'not-allowed' : 'pointer',
-                opacity: (isAnalyzing || !persona || !apiData) ? 0.5 : 1
-              }}
-            >
-              {isAnalyzing ? 'Analyzing...' : 'Run Analysis'}
-            </button>
           </div>
         )}
       </div>
@@ -1380,7 +1256,7 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
         <CommentDrafting
           documentId={selectedDocument.id}
           documentTitle={selectedDocument.title}
-          personaId={persona.name || 'default'} // This should be the actual persona ID from the database
+          personaId={persona.name || 'default'}
           onClose={handleCloseCommentDrafting}
           onCommentSubmitted={handleCommentSubmitted}
         />

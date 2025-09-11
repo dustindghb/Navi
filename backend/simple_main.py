@@ -34,6 +34,7 @@ def init_db():
             preferred_agencies TEXT DEFAULT '[]',
             impact_level TEXT DEFAULT '[]',
             additional_context TEXT,
+            embedding TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -82,6 +83,14 @@ def init_db():
     # Add comment_end_date column if it doesn't exist (migration)
     try:
         cursor.execute("ALTER TABLE documents ADD COLUMN comment_end_date TIMESTAMP")
+        conn.commit()
+    except sqlite3.OperationalError:
+        # Column already exists, ignore
+        pass
+    
+    # Add embedding column to personas if it doesn't exist (migration)
+    try:
+        cursor.execute("ALTER TABLE personas ADD COLUMN embedding TEXT")
         conn.commit()
     except sqlite3.OperationalError:
         # Column already exists, ignore
@@ -211,6 +220,12 @@ class APIHandler(BaseHTTPRequestHandler):
             
         elif path == '/api/upload':
             self.upload_api_data(data)
+            
+        elif path == '/personas/embedding':
+            self.update_persona_embedding(data)
+            
+        elif path == '/documents/embedding':
+            self.update_document_embedding(data)
             
         else:
             self.send_response(404)
@@ -380,8 +395,8 @@ class APIHandler(BaseHTTPRequestHandler):
         
         cursor.execute("""
             INSERT INTO personas (name, role, location, age_range, employment_status, industry,
-                                policy_interests, preferred_agencies, impact_level, additional_context)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                policy_interests, preferred_agencies, impact_level, additional_context, embedding)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data.get('name'),
             data.get('role'),
@@ -392,7 +407,8 @@ class APIHandler(BaseHTTPRequestHandler):
             json.dumps(data.get('policy_interests', [])),
             json.dumps(data.get('preferred_agencies', [])),
             json.dumps(data.get('impact_level', [])),
-            data.get('additional_context')
+            data.get('additional_context'),
+            json.dumps(data.get('embedding', [])) if data.get('embedding') else None
         ))
         
         persona_id = cursor.lastrowid
@@ -430,7 +446,7 @@ class APIHandler(BaseHTTPRequestHandler):
             UPDATE personas 
             SET name = ?, role = ?, location = ?, age_range = ?, employment_status = ?, 
                 industry = ?, policy_interests = ?, preferred_agencies = ?, 
-                impact_level = ?, additional_context = ?, updated_at = CURRENT_TIMESTAMP
+                impact_level = ?, additional_context = ?, embedding = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (
             data.get('name'),
@@ -443,6 +459,7 @@ class APIHandler(BaseHTTPRequestHandler):
             json.dumps(data.get('preferred_agencies', [])),
             json.dumps(data.get('impact_level', [])),
             data.get('additional_context'),
+            json.dumps(data.get('embedding', [])) if data.get('embedding') else None,
             persona_id
         ))
         
@@ -485,7 +502,7 @@ class APIHandler(BaseHTTPRequestHandler):
         
         cursor.execute("""
             SELECT id, name, role, location, age_range, employment_status, industry,
-                   policy_interests, preferred_agencies, impact_level, additional_context,
+                   policy_interests, preferred_agencies, impact_level, additional_context, embedding,
                    created_at, updated_at
             FROM personas
             ORDER BY created_at DESC
@@ -493,6 +510,14 @@ class APIHandler(BaseHTTPRequestHandler):
         
         results = []
         for row in cursor.fetchall():
+            # Parse embedding JSON if it exists
+            embedding = None
+            if row[11]:  # embedding field
+                try:
+                    embedding = json.loads(row[11])
+                except (json.JSONDecodeError, TypeError):
+                    embedding = None
+            
             results.append({
                 'id': row[0],
                 'name': row[1],
@@ -505,8 +530,9 @@ class APIHandler(BaseHTTPRequestHandler):
                 'preferred_agencies': json.loads(row[8]) if row[8] else [],
                 'impact_level': json.loads(row[9]) if row[9] else [],
                 'additional_context': row[10],
-                'created_at': row[11],
-                'updated_at': row[12]
+                'embedding': embedding,
+                'created_at': row[12],
+                'updated_at': row[13]
             })
         
         conn.close()
@@ -524,7 +550,7 @@ class APIHandler(BaseHTTPRequestHandler):
         
         cursor.execute("""
             SELECT id, name, role, location, age_range, employment_status, industry,
-                   policy_interests, preferred_agencies, impact_level, additional_context,
+                   policy_interests, preferred_agencies, impact_level, additional_context, embedding,
                    created_at, updated_at
             FROM personas WHERE id = ?
         """, (persona_id,))
@@ -533,6 +559,14 @@ class APIHandler(BaseHTTPRequestHandler):
         conn.close()
         
         if row:
+            # Parse embedding JSON if it exists
+            embedding = None
+            if row[11]:  # embedding field
+                try:
+                    embedding = json.loads(row[11])
+                except (json.JSONDecodeError, TypeError):
+                    embedding = None
+            
             result = {
                 'id': row[0],
                 'name': row[1],
@@ -545,8 +579,9 @@ class APIHandler(BaseHTTPRequestHandler):
                 'preferred_agencies': json.loads(row[8]) if row[8] else [],
                 'impact_level': json.loads(row[9]) if row[9] else [],
                 'additional_context': row[10],
-                'created_at': row[11],
-                'updated_at': row[12]
+                'embedding': embedding,
+                'created_at': row[12],
+                'updated_at': row[13]
             }
             
             self.send_response(200)
@@ -818,6 +853,106 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         self.wfile.write(json.dumps(result).encode())
+    
+    def update_persona_embedding(self, data):
+        """Update persona embedding"""
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        persona_id = data.get('persona_id')
+        embedding = data.get('embedding', [])
+        
+        if not persona_id:
+            conn.close()
+            self.send_response(400)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "persona_id is required"}).encode())
+            return
+        
+        # Convert embedding array to JSON string for storage
+        embedding_json = json.dumps(embedding) if embedding else None
+        
+        cursor.execute("""
+            UPDATE personas 
+            SET embedding = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (embedding_json, persona_id))
+        
+        if cursor.rowcount > 0:
+            conn.commit()
+            conn.close()
+            
+            result = {
+                'success': True,
+                'persona_id': persona_id,
+                'embedding_dimensions': len(embedding) if embedding else 0,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        else:
+            conn.close()
+            self.send_response(404)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Persona not found"}).encode())
+    
+    def update_document_embedding(self, data):
+        """Update document embedding"""
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        document_id = data.get('document_id')
+        embedding = data.get('embedding', [])
+        
+        if not document_id:
+            conn.close()
+            self.send_response(400)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "document_id is required"}).encode())
+            return
+        
+        # Convert embedding array to JSON string for storage
+        embedding_json = json.dumps(embedding) if embedding else None
+        
+        cursor.execute("""
+            UPDATE documents 
+            SET embedding = ?, created_at = CURRENT_TIMESTAMP
+            WHERE document_id = ?
+        """, (embedding_json, document_id))
+        
+        if cursor.rowcount > 0:
+            conn.commit()
+            conn.close()
+            
+            result = {
+                'success': True,
+                'document_id': document_id,
+                'embedding_dimensions': len(embedding) if embedding else 0,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        else:
+            conn.close()
+            self.send_response(404)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Document not found"}).encode())
 
 def run_server(port=8001):
     """Run the HTTP server"""
