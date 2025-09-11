@@ -18,7 +18,11 @@ import {
   Container,
   Accordion,
   AccordionSummary,
-  AccordionDetails
+  AccordionDetails,
+  Chip,
+  Stack,
+  Card,
+  CardContent
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import PersonIcon from '@mui/icons-material/Person';
@@ -457,6 +461,29 @@ export function Persona() {
                       variant="outlined"
                       helperText="Avoid broad terms like 'Technology' or 'Healthcare' - be specific about your niche or specialization"
                     />
+
+                    <TextField
+                      label="Personal Context & Regulatory Focus"
+                      value={persona.additionalContext || ''}
+                      onChange={(e) => { setPersona({ ...persona, additionalContext: e.target.value }); setIsDirty(true); }}
+                      placeholder="Examples:
+• I run a small tech startup and need to understand data privacy regulations for my SaaS product
+• I'm a healthcare provider implementing telehealth and need to know HIPAA compliance requirements
+• I'm a manufacturer concerned about new EPA emissions standards affecting my facility
+• I'm a consumer advocate focused on protecting vulnerable populations from predatory lending
+• I'm a student studying environmental policy and want to track climate change regulations
+• I'm a small business owner in the food industry and need to understand FDA labeling requirements"
+                      fullWidth
+                      multiline
+                      rows={6}
+                      variant="outlined"
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          backgroundColor: '#1A1A1A',
+                        }
+                      }}
+                      helperText="CRITICAL: Be very specific about your situation, needs, and regulatory concerns. This is the most important field for accurate document matching."
+                    />
                   </Box>
                 </AccordionDetails>
               </Accordion>
@@ -483,342 +510,384 @@ export function Persona() {
                   </Typography>
                 </AccordionSummary>
                 <AccordionDetails sx={{ p: 3 }}>
-                  <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 2 }}>
-                    Be specific! Instead of "Technology", select "AI Regulation" or "Data Privacy". This helps avoid irrelevant matches.
+                  <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 3 }}>
+                    Click on topics that interest you. Be specific to get better matches!
                   </Typography>
+                  
+                  {/* Selected Interests Display */}
+                  {selectedPolicyInterests.length > 0 && (
+                    <Box sx={{ mb: 3 }}>
+                      <Typography variant="subtitle2" sx={{ color: '#FAFAFA', mb: 1 }}>
+                        Selected ({selectedPolicyInterests.length}):
+                      </Typography>
+                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                        {selectedPolicyInterests.map((interest) => (
+                          <Chip
+                            key={interest}
+                            label={interest}
+                            onDelete={() => {
+                              setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                              setIsDirty(true);
+                            }}
+                            sx={{
+                              backgroundColor: '#2A4A2A',
+                              color: '#FAFAFA',
+                              '& .MuiChip-deleteIcon': {
+                                color: '#B8B8B8',
+                                '&:hover': {
+                                  color: '#FAFAFA',
+                                },
+                              },
+                            }}
+                          />
+                        ))}
+                      </Stack>
+                    </Box>
+                  )}
+
+                  {/* Policy Interest Categories */}
                   <Grid container spacing={2}>
-                  {/* Environmental & Energy */}
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <NatureIcon /> Environmental & Energy
-                    </Typography>
-                    <Grid container spacing={1}>
-                      {[
-                        'Climate Change & Carbon Emissions',
-                        'Renewable Energy Standards',
-                        'Water Quality & Pollution',
-                        'Air Quality Regulations',
-                        'Waste Management & Recycling',
-                        'Nuclear Energy & Safety',
-                        'Electric Grid & Power Systems',
-                        'Oil & Gas Pipeline Safety'
-                      ].map((interest) => (
-                        <Grid item xs={12} sm={6} md={3} key={interest}>
-                          <FormControlLabel
-                            control={
-                              <Checkbox
-                                checked={selectedPolicyInterests.includes(interest)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
-                                  } else {
+                    {/* Environmental & Energy */}
+                    <Grid item xs={12} md={6}>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <NatureIcon /> Environmental & Energy
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Climate Change & Carbon Emissions',
+                              'Renewable Energy Standards',
+                              'Water Quality & Pollution',
+                              'Air Quality Regulations',
+                              'Waste Management & Recycling',
+                              'Nuclear Energy & Safety',
+                              'Electric Grid & Power Systems',
+                              'Oil & Gas Pipeline Safety'
+                            ].map((interest) => (
+                              <Chip
+                                key={interest}
+                                label={interest}
+                                onClick={() => {
+                                  if (selectedPolicyInterests.includes(interest)) {
                                     setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  } else {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
                                   }
                                   setIsDirty(true);
                                 }}
+                                variant={selectedPolicyInterests.includes(interest) ? "filled" : "outlined"}
                                 sx={{
-                                  color: '#B8B8B8',
-                                  '&.Mui-checked': {
-                                    color: '#B8B8B8',
+                                  backgroundColor: selectedPolicyInterests.includes(interest) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.75rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedPolicyInterests.includes(interest) ? '#3A5A3A' : '#333',
                                   },
                                 }}
                               />
-                            }
-                            label={interest}
-                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                          />
-                        </Grid>
-                      ))}
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
-                  </Grid>
 
-                  {/* Healthcare & Medical */}
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <LocalHospitalIcon /> Healthcare & Medical
-                    </Typography>
-                    <Grid container spacing={1}>
-                      {[
-                        'Healthcare Data Privacy (HIPAA)',
-                        'Drug Approval & Safety',
-                        'Medical Device Regulations',
-                        'Telehealth & Digital Health'
-                      ].map((interest) => (
-                        <Grid item xs={12} sm={6} md={3} key={interest}>
-                          <FormControlLabel
-                            control={
-                              <Checkbox
-                                checked={selectedPolicyInterests.includes(interest)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
-                                  } else {
+                    {/* Healthcare & Medical */}
+                    <Grid item xs={12} md={6}>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <LocalHospitalIcon /> Healthcare & Medical
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Healthcare Data Privacy (HIPAA)',
+                              'Drug Approval & Safety',
+                              'Medical Device Regulations',
+                              'Telehealth & Digital Health'
+                            ].map((interest) => (
+                              <Chip
+                                key={interest}
+                                label={interest}
+                                onClick={() => {
+                                  if (selectedPolicyInterests.includes(interest)) {
                                     setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  } else {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
                                   }
                                   setIsDirty(true);
                                 }}
+                                variant={selectedPolicyInterests.includes(interest) ? "filled" : "outlined"}
                                 sx={{
-                                  color: '#B8B8B8',
-                                  '&.Mui-checked': {
-                                    color: '#B8B8B8',
+                                  backgroundColor: selectedPolicyInterests.includes(interest) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.75rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedPolicyInterests.includes(interest) ? '#3A5A3A' : '#333',
                                   },
                                 }}
                               />
-                            }
-                            label={interest}
-                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                          />
-                        </Grid>
-                      ))}
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
-                  </Grid>
 
-                  {/* Technology & Digital */}
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <ComputerIcon /> Technology & Digital
-                    </Typography>
-                    <Grid container spacing={1}>
-                      {[
-                        'AI & Machine Learning Regulation',
-                        'Data Privacy & Protection',
-                        'Cybersecurity Standards',
-                        'Social Media & Content Moderation',
-                        'Cryptocurrency & Digital Assets',
-                        'Cybersecurity & Critical Infrastructure'
-                      ].map((interest) => (
-                        <Grid item xs={12} sm={6} md={3} key={interest}>
-                          <FormControlLabel
-                            control={
-                              <Checkbox
-                                checked={selectedPolicyInterests.includes(interest)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
-                                  } else {
+                    {/* Technology & Digital */}
+                    <Grid item xs={12} md={6}>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <ComputerIcon /> Technology & Digital
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'AI & Machine Learning Regulation',
+                              'Data Privacy & Protection',
+                              'Cybersecurity Standards',
+                              'Social Media & Content Moderation',
+                              'Cryptocurrency & Digital Assets',
+                              'Cybersecurity & Critical Infrastructure'
+                            ].map((interest) => (
+                              <Chip
+                                key={interest}
+                                label={interest}
+                                onClick={() => {
+                                  if (selectedPolicyInterests.includes(interest)) {
                                     setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  } else {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
                                   }
                                   setIsDirty(true);
                                 }}
+                                variant={selectedPolicyInterests.includes(interest) ? "filled" : "outlined"}
                                 sx={{
-                                  color: '#B8B8B8',
-                                  '&.Mui-checked': {
-                                    color: '#B8B8B8',
+                                  backgroundColor: selectedPolicyInterests.includes(interest) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.75rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedPolicyInterests.includes(interest) ? '#3A5A3A' : '#333',
                                   },
                                 }}
                               />
-                            }
-                            label={interest}
-                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                          />
-                        </Grid>
-                      ))}
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
-                  </Grid>
 
-                  {/* Financial & Banking */}
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <AttachMoneyIcon /> Financial & Banking
-                    </Typography>
-                    <Grid container spacing={1}>
-                      {[
-                        'Banking & Financial Services',
-                        'Consumer Credit & Lending',
-                        'Investment & Securities'
-                      ].map((interest) => (
-                        <Grid item xs={12} sm={6} md={3} key={interest}>
-                          <FormControlLabel
-                            control={
-                              <Checkbox
-                                checked={selectedPolicyInterests.includes(interest)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
-                                  } else {
+                    {/* Financial & Banking */}
+                    <Grid item xs={12} md={6}>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <AttachMoneyIcon /> Financial & Banking
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Banking & Financial Services',
+                              'Consumer Credit & Lending',
+                              'Investment & Securities'
+                            ].map((interest) => (
+                              <Chip
+                                key={interest}
+                                label={interest}
+                                onClick={() => {
+                                  if (selectedPolicyInterests.includes(interest)) {
                                     setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  } else {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
                                   }
                                   setIsDirty(true);
                                 }}
+                                variant={selectedPolicyInterests.includes(interest) ? "filled" : "outlined"}
                                 sx={{
-                                  color: '#B8B8B8',
-                                  '&.Mui-checked': {
-                                    color: '#B8B8B8',
+                                  backgroundColor: selectedPolicyInterests.includes(interest) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.75rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedPolicyInterests.includes(interest) ? '#3A5A3A' : '#333',
                                   },
                                 }}
                               />
-                            }
-                            label={interest}
-                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                          />
-                        </Grid>
-                      ))}
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
-                  </Grid>
 
-                  {/* Transportation & Infrastructure */}
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <DirectionsCarIcon /> Transportation & Infrastructure
-                    </Typography>
-                    <Grid container spacing={1}>
-                      {[
-                        'Aviation Safety & Operations',
-                        'Highway & Road Safety',
-                        'Public Transportation',
-                        'Railroad Regulations'
-                      ].map((interest) => (
-                        <Grid item xs={12} sm={6} md={3} key={interest}>
-                          <FormControlLabel
-                            control={
-                              <Checkbox
-                                checked={selectedPolicyInterests.includes(interest)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
-                                  } else {
+                    {/* Transportation & Infrastructure */}
+                    <Grid item xs={12} md={6}>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <DirectionsCarIcon /> Transportation & Infrastructure
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Aviation Safety & Operations',
+                              'Highway & Road Safety',
+                              'Public Transportation',
+                              'Railroad Regulations'
+                            ].map((interest) => (
+                              <Chip
+                                key={interest}
+                                label={interest}
+                                onClick={() => {
+                                  if (selectedPolicyInterests.includes(interest)) {
                                     setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  } else {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
                                   }
                                   setIsDirty(true);
                                 }}
+                                variant={selectedPolicyInterests.includes(interest) ? "filled" : "outlined"}
                                 sx={{
-                                  color: '#B8B8B8',
-                                  '&.Mui-checked': {
-                                    color: '#B8B8B8',
+                                  backgroundColor: selectedPolicyInterests.includes(interest) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.75rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedPolicyInterests.includes(interest) ? '#3A5A3A' : '#333',
                                   },
                                 }}
                               />
-                            }
-                            label={interest}
-                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                          />
-                        </Grid>
-                      ))}
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
-                  </Grid>
 
-                  {/* Education & Labor */}
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <SchoolIcon /> Education & Labor
-                    </Typography>
-                    <Grid container spacing={1}>
-                      {[
-                        'Student Loan & Education Finance',
-                        'School Safety & Security',
-                        'Higher Education Accreditation',
-                        'Workplace Safety (OSHA)',
-                        'Minimum Wage & Labor Standards',
-                        'Employee Benefits & Retirement'
-                      ].map((interest) => (
-                        <Grid item xs={12} sm={6} md={3} key={interest}>
-                          <FormControlLabel
-                            control={
-                              <Checkbox
-                                checked={selectedPolicyInterests.includes(interest)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
-                                  } else {
+                    {/* Education & Labor */}
+                    <Grid item xs={12} md={6}>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <SchoolIcon /> Education & Labor
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Student Loan & Education Finance',
+                              'School Safety & Security',
+                              'Higher Education Accreditation',
+                              'Workplace Safety (OSHA)',
+                              'Minimum Wage & Labor Standards',
+                              'Employee Benefits & Retirement'
+                            ].map((interest) => (
+                              <Chip
+                                key={interest}
+                                label={interest}
+                                onClick={() => {
+                                  if (selectedPolicyInterests.includes(interest)) {
                                     setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  } else {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
                                   }
                                   setIsDirty(true);
                                 }}
+                                variant={selectedPolicyInterests.includes(interest) ? "filled" : "outlined"}
                                 sx={{
-                                  color: '#B8B8B8',
-                                  '&.Mui-checked': {
-                                    color: '#B8B8B8',
+                                  backgroundColor: selectedPolicyInterests.includes(interest) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.75rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedPolicyInterests.includes(interest) ? '#3A5A3A' : '#333',
                                   },
                                 }}
                               />
-                            }
-                            label={interest}
-                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                          />
-                        </Grid>
-                      ))}
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
-                  </Grid>
 
-                  {/* Consumer & Safety */}
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <SecurityIcon /> Consumer & Safety
-                    </Typography>
-                    <Grid container spacing={1}>
-                      {[
-                        'Product Safety & Recalls',
-                        'Food Safety & Labeling',
-                        'Advertising & Marketing Practices'
-                      ].map((interest) => (
-                        <Grid item xs={12} sm={6} md={3} key={interest}>
-                          <FormControlLabel
-                            control={
-                              <Checkbox
-                                checked={selectedPolicyInterests.includes(interest)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
-                                  } else {
+                    {/* Consumer & Safety */}
+                    <Grid item xs={12} md={6}>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <SecurityIcon /> Consumer & Safety
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Product Safety & Recalls',
+                              'Food Safety & Labeling',
+                              'Advertising & Marketing Practices'
+                            ].map((interest) => (
+                              <Chip
+                                key={interest}
+                                label={interest}
+                                onClick={() => {
+                                  if (selectedPolicyInterests.includes(interest)) {
                                     setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  } else {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
                                   }
                                   setIsDirty(true);
                                 }}
+                                variant={selectedPolicyInterests.includes(interest) ? "filled" : "outlined"}
                                 sx={{
-                                  color: '#B8B8B8',
-                                  '&.Mui-checked': {
-                                    color: '#B8B8B8',
+                                  backgroundColor: selectedPolicyInterests.includes(interest) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.75rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedPolicyInterests.includes(interest) ? '#3A5A3A' : '#333',
                                   },
                                 }}
                               />
-                            }
-                            label={interest}
-                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                          />
-                        </Grid>
-                      ))}
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
-                  </Grid>
 
-                  {/* Security & Immigration */}
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <SecurityIcon /> Security & Immigration
-                    </Typography>
-                    <Grid container spacing={1}>
-                      {[
-                        'Border Security & Immigration'
-                      ].map((interest) => (
-                        <Grid item xs={12} sm={6} md={3} key={interest}>
-                          <FormControlLabel
-                            control={
-                              <Checkbox
-                                checked={selectedPolicyInterests.includes(interest)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
-                                  } else {
+                    {/* Security & Immigration */}
+                    <Grid item xs={12} md={6}>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <SecurityIcon /> Security & Immigration
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Border Security & Immigration'
+                            ].map((interest) => (
+                              <Chip
+                                key={interest}
+                                label={interest}
+                                onClick={() => {
+                                  if (selectedPolicyInterests.includes(interest)) {
                                     setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  } else {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
                                   }
                                   setIsDirty(true);
                                 }}
+                                variant={selectedPolicyInterests.includes(interest) ? "filled" : "outlined"}
                                 sx={{
-                                  color: '#B8B8B8',
-                                  '&.Mui-checked': {
-                                    color: '#B8B8B8',
+                                  backgroundColor: selectedPolicyInterests.includes(interest) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.75rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedPolicyInterests.includes(interest) ? '#3A5A3A' : '#333',
                                   },
                                 }}
                               />
-                            }
-                            label={interest}
-                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                          />
-                        </Grid>
-                      ))}
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
                   </Grid>
-                  </Grid>
-                  <Typography variant="body2" sx={{ color: '#B8B8B8', marginTop: 2, fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: 1 }}>
+                  
+                  <Typography variant="body2" sx={{ color: '#B8B8B8', marginTop: 3, fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: 1 }}>
                     <LightbulbIcon /> Tip: Select only the areas you're genuinely interested in. Too many broad categories can lead to irrelevant matches.
                   </Typography>
                 </AccordionDetails>
@@ -842,482 +911,520 @@ export function Persona() {
                   }}
                 >
                   <Typography variant="h6" sx={{ color: '#FAFAFA', display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <AccountBalanceIcon /> Regulatory Focus Areas
+                    <AccountBalanceIcon /> Agencies
                   </Typography>
                 </AccordionSummary>
                 <AccordionDetails sx={{ p: 3 }}>
-                  <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 2 }}>
-                    Help us prioritize which regulations to show you
+                  <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 3 }}>
+                    Click on agencies you want to prioritize for document matching
                   </Typography>
 
-                <Box sx={{ mb: 3 }}>
-                  <Typography variant="subtitle1" sx={{ color: '#FAFAFA', marginBottom: 2 }}>
-                    Preferred Agencies (Grouped by Focus Area)
-                  </Typography>
+                  {/* Selected Agencies Display */}
+                  {selectedAgencies.length > 0 && (
+                    <Box sx={{ mb: 3 }}>
+                      <Typography variant="subtitle2" sx={{ color: '#FAFAFA', mb: 1 }}>
+                        Selected Agencies ({selectedAgencies.length}):
+                      </Typography>
+                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                        {selectedAgencies.map((agency) => (
+                          <Chip
+                            key={agency}
+                            label={agency}
+                            onDelete={() => {
+                              setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                              setIsDirty(true);
+                            }}
+                            sx={{
+                              backgroundColor: '#2A4A2A',
+                              color: '#FAFAFA',
+                              fontSize: '0.75rem',
+                              '& .MuiChip-deleteIcon': {
+                                color: '#B8B8B8',
+                                '&:hover': {
+                                  color: '#FAFAFA',
+                                },
+                              },
+                            }}
+                          />
+                        ))}
+                      </Stack>
+                    </Box>
+                  )}
+
+                  {/* Agency Categories */}
                   <Grid container spacing={2}>
                     {/* Health & Safety */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <LocalHospitalIcon /> Health & Safety
-                      </Typography>
-                      <Grid container spacing={1}>
-                        {[
-                          'Food and Drug Administration (FDA)',
-                          'Department of Health and Human Services (HHS)',
-                          'Centers for Medicare & Medicaid Services (CMS)',
-                          'Centers for Disease Control and Prevention (CDC)',
-                          'National Institutes of Health (NIH)',
-                          'Health Resources and Services Administration (HRSA)',
-                          'Substance Abuse and Mental Health Services Administration (SAMHSA)',
-                          'Agency for Healthcare Research and Quality (AHRQ)',
-                          'Indian Health Service (IHS)'
-                        ].map((agency) => (
-                          <Grid item xs={12} key={agency}>
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={selectedAgencies.includes(agency)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedAgencies([...selectedAgencies, agency]);
-                                    } else {
-                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
-                                    }
-                                    setIsDirty(true);
-                                  }}
-                                  sx={{
-                                    color: '#B8B8B8',
-                                    '&.Mui-checked': {
-                                      color: '#B8B8B8',
-                                    },
-                                  }}
-                                />
-                              }
-                              label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                            />
-                          </Grid>
-                        ))}
-                      </Grid>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <LocalHospitalIcon /> Health & Safety
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Food and Drug Administration (FDA)',
+                              'Department of Health and Human Services (HHS)',
+                              'Centers for Medicare & Medicaid Services (CMS)',
+                              'Centers for Disease Control and Prevention (CDC)',
+                              'National Institutes of Health (NIH)',
+                              'Health Resources and Services Administration (HRSA)',
+                              'Substance Abuse and Mental Health Services Administration (SAMHSA)',
+                              'Agency for Healthcare Research and Quality (AHRQ)',
+                              'Indian Health Service (IHS)'
+                            ].map((agency) => (
+                              <Chip
+                                key={agency}
+                                label={agency}
+                                onClick={() => {
+                                  if (selectedAgencies.includes(agency)) {
+                                    setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                  } else {
+                                    setSelectedAgencies([...selectedAgencies, agency]);
+                                  }
+                                  setIsDirty(true);
+                                }}
+                                variant={selectedAgencies.includes(agency) ? "filled" : "outlined"}
+                                sx={{
+                                  backgroundColor: selectedAgencies.includes(agency) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.7rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedAgencies.includes(agency) ? '#3A5A3A' : '#333',
+                                  },
+                                }}
+                              />
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
 
                     {/* Environment & Energy */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <NatureIcon /> Environment & Energy
-                      </Typography>
-                      <Grid container spacing={1}>
-                        {[
-                          'Environmental Protection Agency (EPA)',
-                          'Department of Energy (DOE)',
-                          'Bureau of Land Management (BLM)',
-                          'Fish and Wildlife Service (FWS)',
-                          'National Park Service (NPS)',
-                          'Forest Service (USFS)',
-                          'Nuclear Regulatory Commission (NRC)',
-                          'Federal Energy Regulatory Commission (FERC)',
-                          'Bureau of Ocean Energy Management (BOEM)',
-                          'Bureau of Safety and Environmental Enforcement (BSEE)',
-                          'U.S. Geological Survey (USGS)',
-                          'National Oceanic and Atmospheric Administration (NOAA)'
-                        ].map((agency) => (
-                          <Grid item xs={12} key={agency}>
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={selectedAgencies.includes(agency)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedAgencies([...selectedAgencies, agency]);
-                                    } else {
-                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
-                                    }
-                                    setIsDirty(true);
-                                  }}
-                                  sx={{
-                                    color: '#B8B8B8',
-                                    '&.Mui-checked': {
-                                      color: '#B8B8B8',
-                                    },
-                                  }}
-                                />
-                              }
-                              label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                            />
-                          </Grid>
-                        ))}
-                      </Grid>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <NatureIcon /> Environment & Energy
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Environmental Protection Agency (EPA)',
+                              'Department of Energy (DOE)',
+                              'Bureau of Land Management (BLM)',
+                              'Fish and Wildlife Service (FWS)',
+                              'National Park Service (NPS)',
+                              'Forest Service (USFS)',
+                              'Nuclear Regulatory Commission (NRC)',
+                              'Federal Energy Regulatory Commission (FERC)',
+                              'Bureau of Ocean Energy Management (BOEM)',
+                              'Bureau of Safety and Environmental Enforcement (BSEE)',
+                              'U.S. Geological Survey (USGS)',
+                              'National Oceanic and Atmospheric Administration (NOAA)'
+                            ].map((agency) => (
+                              <Chip
+                                key={agency}
+                                label={agency}
+                                onClick={() => {
+                                  if (selectedAgencies.includes(agency)) {
+                                    setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                  } else {
+                                    setSelectedAgencies([...selectedAgencies, agency]);
+                                  }
+                                  setIsDirty(true);
+                                }}
+                                variant={selectedAgencies.includes(agency) ? "filled" : "outlined"}
+                                sx={{
+                                  backgroundColor: selectedAgencies.includes(agency) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.7rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedAgencies.includes(agency) ? '#3A5A3A' : '#333',
+                                  },
+                                }}
+                              />
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
 
                     {/* Technology & Communications */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <ComputerIcon /> Technology & Communications
-                      </Typography>
-                      <Grid container spacing={1}>
-                        {[
-                          'Federal Communications Commission (FCC)',
-                          'National Telecommunications and Information Administration (NTIA)',
-                          'Federal Trade Commission (FTC)',
-                          'National Institute of Standards and Technology (NIST)',
-                          'Cybersecurity and Infrastructure Security Agency (CISA)',
-                          'National Science Foundation (NSF)',
-                          'Defense Advanced Research Projects Agency (DARPA)'
-                        ].map((agency) => (
-                          <Grid item xs={12} key={agency}>
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={selectedAgencies.includes(agency)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedAgencies([...selectedAgencies, agency]);
-                                    } else {
-                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
-                                    }
-                                    setIsDirty(true);
-                                  }}
-                                  sx={{
-                                    color: '#B8B8B8',
-                                    '&.Mui-checked': {
-                                      color: '#B8B8B8',
-                                    },
-                                  }}
-                                />
-                              }
-                              label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                            />
-                          </Grid>
-                        ))}
-                      </Grid>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <ComputerIcon /> Technology & Communications
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Federal Communications Commission (FCC)',
+                              'National Telecommunications and Information Administration (NTIA)',
+                              'Federal Trade Commission (FTC)',
+                              'National Institute of Standards and Technology (NIST)',
+                              'Cybersecurity and Infrastructure Security Agency (CISA)',
+                              'National Science Foundation (NSF)',
+                              'Defense Advanced Research Projects Agency (DARPA)'
+                            ].map((agency) => (
+                              <Chip
+                                key={agency}
+                                label={agency}
+                                onClick={() => {
+                                  if (selectedAgencies.includes(agency)) {
+                                    setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                  } else {
+                                    setSelectedAgencies([...selectedAgencies, agency]);
+                                  }
+                                  setIsDirty(true);
+                                }}
+                                variant={selectedAgencies.includes(agency) ? "filled" : "outlined"}
+                                sx={{
+                                  backgroundColor: selectedAgencies.includes(agency) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.7rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedAgencies.includes(agency) ? '#3A5A3A' : '#333',
+                                  },
+                                }}
+                              />
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
 
                     {/* Financial & Consumer */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <AttachMoneyIcon /> Financial & Consumer
-                      </Typography>
-                      <Grid container spacing={1}>
-                        {[
-                          'Securities and Exchange Commission (SEC)',
-                          'Consumer Financial Protection Bureau (CFPB)',
-                          'Federal Trade Commission (FTC)',
-                          'Federal Reserve System (Fed)',
-                          'Office of the Comptroller of the Currency (OCC)',
-                          'Federal Deposit Insurance Corporation (FDIC)',
-                          'National Credit Union Administration (NCUA)',
-                          'Commodity Futures Trading Commission (CFTC)',
-                          'Financial Crimes Enforcement Network (FinCEN)',
-                          'Internal Revenue Service (IRS)',
-                          'Treasury Department (USDT)',
-                          'Small Business Administration (SBA)'
-                        ].map((agency) => (
-                          <Grid item xs={12} key={agency}>
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={selectedAgencies.includes(agency)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedAgencies([...selectedAgencies, agency]);
-                                    } else {
-                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
-                                    }
-                                    setIsDirty(true);
-                                  }}
-                                  sx={{
-                                    color: '#B8B8B8',
-                                    '&.Mui-checked': {
-                                      color: '#B8B8B8',
-                                    },
-                                  }}
-                                />
-                              }
-                              label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                            />
-                          </Grid>
-                        ))}
-                      </Grid>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <AttachMoneyIcon /> Financial & Consumer
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Securities and Exchange Commission (SEC)',
+                              'Consumer Financial Protection Bureau (CFPB)',
+                              'Federal Trade Commission (FTC)',
+                              'Federal Reserve System (Fed)',
+                              'Office of the Comptroller of the Currency (OCC)',
+                              'Federal Deposit Insurance Corporation (FDIC)',
+                              'National Credit Union Administration (NCUA)',
+                              'Commodity Futures Trading Commission (CFTC)',
+                              'Financial Crimes Enforcement Network (FinCEN)',
+                              'Internal Revenue Service (IRS)',
+                              'Treasury Department (USDT)',
+                              'Small Business Administration (SBA)'
+                            ].map((agency) => (
+                              <Chip
+                                key={agency}
+                                label={agency}
+                                onClick={() => {
+                                  if (selectedAgencies.includes(agency)) {
+                                    setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                  } else {
+                                    setSelectedAgencies([...selectedAgencies, agency]);
+                                  }
+                                  setIsDirty(true);
+                                }}
+                                variant={selectedAgencies.includes(agency) ? "filled" : "outlined"}
+                                sx={{
+                                  backgroundColor: selectedAgencies.includes(agency) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.7rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedAgencies.includes(agency) ? '#3A5A3A' : '#333',
+                                  },
+                                }}
+                              />
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
 
                     {/* Transportation & Infrastructure */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <DirectionsCarIcon /> Transportation & Infrastructure
-                      </Typography>
-                      <Grid container spacing={1}>
-                        {[
-                          'Department of Transportation (DOT)',
-                          'Federal Aviation Administration (FAA)',
-                          'Federal Highway Administration (FHWA)',
-                          'Federal Motor Carrier Safety Administration (FMCSA)',
-                          'Federal Railroad Administration (FRA)',
-                          'Federal Transit Administration (FTA)',
-                          'Maritime Administration (MARAD)',
-                          'National Highway Traffic Safety Administration (NHTSA)',
-                          'Pipeline and Hazardous Materials Safety Administration (PHMSA)',
-                          'Army Corps of Engineers (USACE)',
-                          'Federal Housing Administration (FHA)'
-                        ].map((agency) => (
-                          <Grid item xs={12} key={agency}>
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={selectedAgencies.includes(agency)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedAgencies([...selectedAgencies, agency]);
-                                    } else {
-                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
-                                    }
-                                    setIsDirty(true);
-                                  }}
-                                  sx={{
-                                    color: '#B8B8B8',
-                                    '&.Mui-checked': {
-                                      color: '#B8B8B8',
-                                    },
-                                  }}
-                                />
-                              }
-                              label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                            />
-                          </Grid>
-                        ))}
-                      </Grid>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <DirectionsCarIcon /> Transportation & Infrastructure
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Department of Transportation (DOT)',
+                              'Federal Aviation Administration (FAA)',
+                              'Federal Highway Administration (FHWA)',
+                              'Federal Motor Carrier Safety Administration (FMCSA)',
+                              'Federal Railroad Administration (FRA)',
+                              'Federal Transit Administration (FTA)',
+                              'Maritime Administration (MARAD)',
+                              'National Highway Traffic Safety Administration (NHTSA)',
+                              'Pipeline and Hazardous Materials Safety Administration (PHMSA)',
+                              'Army Corps of Engineers (USACE)',
+                              'Federal Housing Administration (FHA)'
+                            ].map((agency) => (
+                              <Chip
+                                key={agency}
+                                label={agency}
+                                onClick={() => {
+                                  if (selectedAgencies.includes(agency)) {
+                                    setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                  } else {
+                                    setSelectedAgencies([...selectedAgencies, agency]);
+                                  }
+                                  setIsDirty(true);
+                                }}
+                                variant={selectedAgencies.includes(agency) ? "filled" : "outlined"}
+                                sx={{
+                                  backgroundColor: selectedAgencies.includes(agency) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.7rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedAgencies.includes(agency) ? '#3A5A3A' : '#333',
+                                  },
+                                }}
+                              />
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
 
                     {/* Labor & Employment */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <SchoolIcon /> Labor & Employment
-                      </Typography>
-                      <Grid container spacing={1}>
-                        {[
-                          'Department of Labor (DOL)',
-                          'Occupational Safety and Health Administration (OSHA)',
-                          'Equal Employment Opportunity Commission (EEOC)',
-                          'National Labor Relations Board (NLRB)',
-                          'Mine Safety and Health Administration (MSHA)',
-                          'Wage and Hour Division (WHD)',
-                          'Office of Federal Contract Compliance Programs (OFCCP)',
-                          'Department of Education (ED)',
-                          'Office for Civil Rights (OCR)'
-                        ].map((agency) => (
-                          <Grid item xs={12} key={agency}>
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={selectedAgencies.includes(agency)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedAgencies([...selectedAgencies, agency]);
-                                    } else {
-                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
-                                    }
-                                    setIsDirty(true);
-                                  }}
-                                  sx={{
-                                    color: '#B8B8B8',
-                                    '&.Mui-checked': {
-                                      color: '#B8B8B8',
-                                    },
-                                  }}
-                                />
-                              }
-                              label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                            />
-                          </Grid>
-                        ))}
-                      </Grid>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <SchoolIcon /> Labor & Employment
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Department of Labor (DOL)',
+                              'Occupational Safety and Health Administration (OSHA)',
+                              'Equal Employment Opportunity Commission (EEOC)',
+                              'National Labor Relations Board (NLRB)',
+                              'Mine Safety and Health Administration (MSHA)',
+                              'Wage and Hour Division (WHD)',
+                              'Office of Federal Contract Compliance Programs (OFCCP)',
+                              'Department of Education (ED)',
+                              'Office for Civil Rights (OCR)'
+                            ].map((agency) => (
+                              <Chip
+                                key={agency}
+                                label={agency}
+                                onClick={() => {
+                                  if (selectedAgencies.includes(agency)) {
+                                    setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                  } else {
+                                    setSelectedAgencies([...selectedAgencies, agency]);
+                                  }
+                                  setIsDirty(true);
+                                }}
+                                variant={selectedAgencies.includes(agency) ? "filled" : "outlined"}
+                                sx={{
+                                  backgroundColor: selectedAgencies.includes(agency) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.7rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedAgencies.includes(agency) ? '#3A5A3A' : '#333',
+                                  },
+                                }}
+                              />
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
 
                     {/* Security & Immigration */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <SecurityIcon /> Security & Immigration
-                      </Typography>
-                      <Grid container spacing={1}>
-                        {[
-                          'Department of Homeland Security (DHS)',
-                          'U.S. Citizenship and Immigration Services (USCIS)',
-                          'Customs and Border Protection (CBP)',
-                          'Immigration and Customs Enforcement (ICE)',
-                          'Transportation Security Administration (TSA)',
-                          'Federal Emergency Management Agency (FEMA)',
-                          'U.S. Coast Guard (USCG)',
-                          'Department of Justice (DOJ)',
-                          'Federal Bureau of Investigation (FBI)',
-                          'Bureau of Alcohol, Tobacco, Firearms and Explosives (ATF)',
-                          'Drug Enforcement Administration (DEA)',
-                          'U.S. Marshals Service (USMS)'
-                        ].map((agency) => (
-                          <Grid item xs={12} key={agency}>
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={selectedAgencies.includes(agency)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedAgencies([...selectedAgencies, agency]);
-                                    } else {
-                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
-                                    }
-                                    setIsDirty(true);
-                                  }}
-                                  sx={{
-                                    color: '#B8B8B8',
-                                    '&.Mui-checked': {
-                                      color: '#B8B8B8',
-                                    },
-                                  }}
-                                />
-                              }
-                              label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                            />
-                          </Grid>
-                        ))}
-                      </Grid>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <SecurityIcon /> Security & Immigration
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Department of Homeland Security (DHS)',
+                              'U.S. Citizenship and Immigration Services (USCIS)',
+                              'Customs and Border Protection (CBP)',
+                              'Immigration and Customs Enforcement (ICE)',
+                              'Transportation Security Administration (TSA)',
+                              'Federal Emergency Management Agency (FEMA)',
+                              'U.S. Coast Guard (USCG)',
+                              'Department of Justice (DOJ)',
+                              'Federal Bureau of Investigation (FBI)',
+                              'Bureau of Alcohol, Tobacco, Firearms and Explosives (ATF)',
+                              'Drug Enforcement Administration (DEA)',
+                              'U.S. Marshals Service (USMS)'
+                            ].map((agency) => (
+                              <Chip
+                                key={agency}
+                                label={agency}
+                                onClick={() => {
+                                  if (selectedAgencies.includes(agency)) {
+                                    setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                  } else {
+                                    setSelectedAgencies([...selectedAgencies, agency]);
+                                  }
+                                  setIsDirty(true);
+                                }}
+                                variant={selectedAgencies.includes(agency) ? "filled" : "outlined"}
+                                sx={{
+                                  backgroundColor: selectedAgencies.includes(agency) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.7rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedAgencies.includes(agency) ? '#3A5A3A' : '#333',
+                                  },
+                                }}
+                              />
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
 
                     {/* Agriculture & Food */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <NatureIcon /> Agriculture & Food
-                      </Typography>
-                      <Grid container spacing={1}>
-                        {[
-                          'Department of Agriculture (USDA)',
-                          'Food Safety and Inspection Service (FSIS)',
-                          'Animal and Plant Health Inspection Service (APHIS)',
-                          'Agricultural Marketing Service (AMS)',
-                          'Farm Service Agency (FSA)',
-                          'Natural Resources Conservation Service (NRCS)',
-                          'Rural Development (RD)'
-                        ].map((agency) => (
-                          <Grid item xs={12} key={agency}>
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={selectedAgencies.includes(agency)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedAgencies([...selectedAgencies, agency]);
-                                    } else {
-                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
-                                    }
-                                    setIsDirty(true);
-                                  }}
-                                  sx={{
-                                    color: '#B8B8B8',
-                                    '&.Mui-checked': {
-                                      color: '#B8B8B8',
-                                    },
-                                  }}
-                                />
-                              }
-                              label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                            />
-                          </Grid>
-                        ))}
-                      </Grid>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <NatureIcon /> Agriculture & Food
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Department of Agriculture (USDA)',
+                              'Food Safety and Inspection Service (FSIS)',
+                              'Animal and Plant Health Inspection Service (APHIS)',
+                              'Agricultural Marketing Service (AMS)',
+                              'Farm Service Agency (FSA)',
+                              'Natural Resources Conservation Service (NRCS)',
+                              'Rural Development (RD)'
+                            ].map((agency) => (
+                              <Chip
+                                key={agency}
+                                label={agency}
+                                onClick={() => {
+                                  if (selectedAgencies.includes(agency)) {
+                                    setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                  } else {
+                                    setSelectedAgencies([...selectedAgencies, agency]);
+                                  }
+                                  setIsDirty(true);
+                                }}
+                                variant={selectedAgencies.includes(agency) ? "filled" : "outlined"}
+                                sx={{
+                                  backgroundColor: selectedAgencies.includes(agency) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.7rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedAgencies.includes(agency) ? '#3A5A3A' : '#333',
+                                  },
+                                }}
+                              />
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
 
                     {/* Defense & Military */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <SecurityIcon /> Defense & Military
-                      </Typography>
-                      <Grid container spacing={1}>
-                        {[
-                          'Department of Defense (DOD)',
-                          'Department of Veterans Affairs (VA)',
-                          'Defense Contract Management Agency (DCMA)',
-                          'Defense Logistics Agency (DLA)',
-                          'National Security Agency (NSA)',
-                          'Central Intelligence Agency (CIA)'
-                        ].map((agency) => (
-                          <Grid item xs={12} key={agency}>
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={selectedAgencies.includes(agency)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedAgencies([...selectedAgencies, agency]);
-                                    } else {
-                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
-                                    }
-                                    setIsDirty(true);
-                                  }}
-                                  sx={{
-                                    color: '#B8B8B8',
-                                    '&.Mui-checked': {
-                                      color: '#B8B8B8',
-                                    },
-                                  }}
-                                />
-                              }
-                              label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                            />
-                          </Grid>
-                        ))}
-                      </Grid>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <SecurityIcon /> Defense & Military
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Department of Defense (DOD)',
+                              'Department of Veterans Affairs (VA)',
+                              'Defense Contract Management Agency (DCMA)',
+                              'Defense Logistics Agency (DLA)',
+                              'National Security Agency (NSA)',
+                              'Central Intelligence Agency (CIA)'
+                            ].map((agency) => (
+                              <Chip
+                                key={agency}
+                                label={agency}
+                                onClick={() => {
+                                  if (selectedAgencies.includes(agency)) {
+                                    setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                  } else {
+                                    setSelectedAgencies([...selectedAgencies, agency]);
+                                  }
+                                  setIsDirty(true);
+                                }}
+                                variant={selectedAgencies.includes(agency) ? "filled" : "outlined"}
+                                sx={{
+                                  backgroundColor: selectedAgencies.includes(agency) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.7rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedAgencies.includes(agency) ? '#3A5A3A' : '#333',
+                                  },
+                                }}
+                              />
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
 
                     {/* International & Trade */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <AccountBalanceIcon /> International & Trade
-                      </Typography>
-                      <Grid container spacing={1}>
-                        {[
-                          'Department of State (DOS)',
-                          'Department of Commerce (DOC)',
-                          'International Trade Administration (ITA)',
-                          'Bureau of Industry and Security (BIS)',
-                          'U.S. Trade Representative (USTR)',
-                          'Export-Import Bank of the United States (EXIM)',
-                          'Overseas Private Investment Corporation (OPIC)'
-                        ].map((agency) => (
-                          <Grid item xs={12} key={agency}>
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={selectedAgencies.includes(agency)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedAgencies([...selectedAgencies, agency]);
-                                    } else {
-                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
-                                    }
-                                    setIsDirty(true);
-                                  }}
-                                  sx={{
-                                    color: '#B8B8B8',
-                                    '&.Mui-checked': {
-                                      color: '#B8B8B8',
-                                    },
-                                  }}
-                                />
-                              }
-                              label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
-                            />
-                          </Grid>
-                        ))}
-                      </Grid>
+                      <Card sx={{ backgroundColor: '#2A2A2A', border: '1px solid #444' }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Typography variant="subtitle1" sx={{ color: '#FAFAFA', fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <AccountBalanceIcon /> International & Trade
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {[
+                              'Department of State (DOS)',
+                              'Department of Commerce (DOC)',
+                              'International Trade Administration (ITA)',
+                              'Bureau of Industry and Security (BIS)',
+                              'U.S. Trade Representative (USTR)',
+                              'Export-Import Bank of the United States (EXIM)',
+                              'Overseas Private Investment Corporation (OPIC)'
+                            ].map((agency) => (
+                              <Chip
+                                key={agency}
+                                label={agency}
+                                onClick={() => {
+                                  if (selectedAgencies.includes(agency)) {
+                                    setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                  } else {
+                                    setSelectedAgencies([...selectedAgencies, agency]);
+                                  }
+                                  setIsDirty(true);
+                                }}
+                                variant={selectedAgencies.includes(agency) ? "filled" : "outlined"}
+                                sx={{
+                                  backgroundColor: selectedAgencies.includes(agency) ? '#2A4A2A' : 'transparent',
+                                  color: '#FAFAFA',
+                                  borderColor: '#666',
+                                  fontSize: '0.7rem',
+                                  '&:hover': {
+                                    backgroundColor: selectedAgencies.includes(agency) ? '#3A5A3A' : '#333',
+                                  },
+                                }}
+                              />
+                            ))}
+                          </Stack>
+                        </CardContent>
+                      </Card>
                     </Grid>
                   </Grid>
-                </Box>
 
                 <Box sx={{ mb: 3 }}>
                   <Typography variant="subtitle1" sx={{ color: '#FAFAFA', marginBottom: 1 }}>
@@ -1361,55 +1468,6 @@ export function Persona() {
                 </AccordionDetails>
               </Accordion>
 
-              {/* Additional Context Accordion */}
-              <Accordion 
-                sx={{ 
-                  background: '#1A1A1A', 
-                  border: '1px solid #333',
-                  '&:before': { display: 'none' },
-                  '&.Mui-expanded': { margin: 0 }
-                }}
-              >
-                <AccordionSummary
-                  expandIcon={<ExpandMoreIcon sx={{ color: '#FAFAFA' }} />}
-                  sx={{ 
-                    background: '#2A2A2A',
-                    borderBottom: '1px solid #333',
-                    '&.Mui-expanded': { minHeight: 'auto' }
-                  }}
-                >
-                  <Typography variant="h6" sx={{ color: '#B8B8B8', display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <TargetIcon /> Specific Context & Use Cases
-                  </Typography>
-                </AccordionSummary>
-                <AccordionDetails sx={{ p: 3 }}>
-                  <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 2 }}>
-                    This is the MOST IMPORTANT field for accurate matching. Be very specific about your situation, needs, and use cases.
-                  </Typography>
-                  <TextField
-                    label="Detailed Context & Specific Interests"
-                    value={persona.additionalContext || ''}
-                    onChange={(e) => { setPersona({ ...persona, additionalContext: e.target.value }); setIsDirty(true); }}
-                    placeholder="Examples:
-• I run a small tech startup and need to understand data privacy regulations for my SaaS product
-• I'm a healthcare provider implementing telehealth and need to know HIPAA compliance requirements
-• I'm a manufacturer concerned about new EPA emissions standards affecting my facility
-• I'm a consumer advocate focused on protecting vulnerable populations from predatory lending
-• I'm a student studying environmental policy and want to track climate change regulations
-• I'm a small business owner in the food industry and need to understand FDA labeling requirements"
-                    fullWidth
-                    multiline
-                    rows={6}
-                    variant="outlined"
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        backgroundColor: '#1A1A1A',
-                      }
-                    }}
-                    helperText="Be specific about your role, industry, location, and exact regulatory concerns. This helps avoid irrelevant matches."
-                  />
-                </AccordionDetails>
-              </Accordion>
 
               {/* Status Messages */}
           {errorText && (
