@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { CommentDrafting } from '../components/CommentDrafting';
+import { fetchCommentsFromRegulationsGov, deriveDocketId, getDocumentCommentCount } from '../utils/regulationsGovApi';
 
 interface PersonaData {
   id?: number;
@@ -38,6 +39,7 @@ interface DocumentData {
 
 interface GPTReasoningResult {
   relevanceScore: number; // 1-10
+  shortSummary: string;
   reasoning: string;
   thoughtProcess: string;
 }
@@ -65,14 +67,23 @@ export function Dashboard() {
   const [showCommentDrafting, setShowCommentDrafting] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<{id: string, title: string} | null>(null);
   
+  // Comments viewing state
+  const [showComments, setShowComments] = useState(false);
+  const [selectedDocumentForComments, setSelectedDocumentForComments] = useState<{id: string, title: string, docket_id?: string} | null>(null);
+  const [documentComments, setDocumentComments] = useState<any[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [documentCommentCounts, setDocumentCommentCounts] = useState<{[documentId: string]: number}>({});
+  const [isLoadingCommentCounts, setIsLoadingCommentCounts] = useState(false);
+  const [enableCommentCounts, setEnableCommentCounts] = useState(true);
+  
   // GPT reasoning state
   const [isGeneratingReasoning, setIsGeneratingReasoning] = useState(false);
   const [reasoningProgress, setReasoningProgress] = useState({ current: 0, total: 0 });
   const [shouldStopReasoning, setShouldStopReasoning] = useState(false);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   
-  // Semantic matching threshold
-  const semanticThreshold = 5.2;
+  // Top K documents for semantic matching
+  const [topK, setTopK] = useState(20);
   // GPT reasoning threshold
   const gptThreshold = 5.0;
   
@@ -229,6 +240,9 @@ export function Dashboard() {
 
         if (!chunkResponse.ok) {
           const errorText = await chunkResponse.text();
+          if (chunkResponse.status === 0 || chunkResponse.status >= 500) {
+            throw new Error(`Cannot connect to embedding model at ${url}. Please check if the model is running.`);
+          }
           throw new Error(`HTTP ${chunkResponse.status}: ${errorText}`);
         }
 
@@ -265,6 +279,7 @@ export function Dashboard() {
 
     setIsEmbeddingDocuments(true);
     setDocumentEmbeddingProgress({ current: 0, total: documents.length });
+    setError(null);
 
     try {
       let successCount = 0;
@@ -311,6 +326,7 @@ export function Dashboard() {
 
         } catch (err) {
           errorCount++;
+          console.error(`Error embedding document ${document.document_id}:`, err);
         }
 
         // Small delay to avoid overwhelming the embedding service
@@ -322,7 +338,9 @@ export function Dashboard() {
       await loadData();
 
     } catch (err) {
-      // Error in document embedding process
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error during embedding';
+      setError(errorMessage);
+      console.error('Error in document embedding process:', err);
     } finally {
       setIsEmbeddingDocuments(false);
       setDocumentEmbeddingProgress({ current: 0, total: 0 });
@@ -373,12 +391,18 @@ export function Dashboard() {
           relevanceReason: savedMatch.relevance_reason,
           gptReasoning: {
             relevanceScore: savedMatch.gpt_relevance_score,
+            shortSummary: savedMatch.gpt_short_summary || '',
             reasoning: savedMatch.gpt_reasoning,
             thoughtProcess: savedMatch.gpt_thought_process
           }
         }));
         
         setMatchedDocuments(convertedMatches);
+        
+        // Fetch comment counts for loaded matches
+        if (convertedMatches.length > 0) {
+          fetchCommentCounts(convertedMatches.map(match => match.document));
+        }
       }
     } catch (err) {
       console.error('Error loading saved matches:', err);
@@ -394,6 +418,7 @@ export function Dashboard() {
         similarity_score: match.similarityScore,
         gpt_relevance_score: match.gptReasoning?.relevanceScore || 0,
         relevance_reason: match.relevanceReason || '',
+        gpt_short_summary: match.gptReasoning?.shortSummary || '',
         gpt_reasoning: match.gptReasoning?.reasoning || '',
         gpt_thought_process: match.gptReasoning?.thoughtProcess || ''
       }));
@@ -480,7 +505,6 @@ export function Dashboard() {
 
     setIsLoading(true);
     setError(null);
-    const semanticThresholdValue = semanticThreshold / 10; // Convert from 0-10 scale to 0-1 scale
 
     try {
       const personaEmbedding = persona.embedding;
@@ -496,8 +520,7 @@ export function Dashboard() {
         return;
       }
 
-      // Step 1: Perform semantic matching
-      const semanticMatches: MatchedDocument[] = [];
+      // Step 1: Calculate similarities for all documents
       const allSimilarities: {doc: DocumentData, similarity: number}[] = [];
 
       for (const doc of documentsWithEmbeddings) {
@@ -532,21 +555,24 @@ export function Dashboard() {
         }
         
         allSimilarities.push({doc, similarity: bestSimilarity});
-        
-        if (bestSimilarity >= semanticThresholdValue) {
-          semanticMatches.push({
-            document: doc,
-            similarityScore: bestSimilarity,
-            relevanceReason: generateRelevanceReason(persona, doc, bestSimilarity)
-          });
-        }
       }
 
-      if (semanticMatches.length === 0) {
+      // Sort by similarity (highest first) and take top K
+      allSimilarities.sort((a, b) => b.similarity - a.similarity);
+      const topKSimilarities = allSimilarities.slice(0, topK);
+
+      if (topKSimilarities.length === 0) {
         setMatchedDocuments([]);
-        setError(`No documents found above semantic threshold of ${semanticThreshold}/10`);
+        setError('No documents with compatible embeddings found.');
         return;
       }
+
+      // Convert to semantic matches
+      const semanticMatches: MatchedDocument[] = topKSimilarities.map(({doc, similarity}) => ({
+        document: doc,
+        similarityScore: similarity,
+        relevanceReason: generateRelevanceReason(persona, doc, similarity)
+      }));
 
       // Step 2: Perform GPT reasoning on semantic matches
       setIsGeneratingReasoning(true);
@@ -575,9 +601,21 @@ export function Dashboard() {
           // Count documents that pass GPT threshold
           if (gptResult.relevanceScore >= gptThreshold) {
             gptMatchesCount++;
-            finalMatches.push({
+            const newMatch = {
               ...match,
               gptReasoning: gptResult
+            };
+            finalMatches.push(newMatch);
+            
+            // Live update: add this match to the displayed matches immediately
+            setMatchedDocuments(prevMatches => {
+              const updated = [...prevMatches, newMatch];
+              // Sort by GPT score (highest first)
+              return updated.sort((a, b) => {
+                const scoreA = a.gptReasoning?.relevanceScore || 0;
+                const scoreB = b.gptReasoning?.relevanceScore || 0;
+                return scoreB - scoreA;
+              });
             });
           }
         } catch (err) {
@@ -596,22 +634,16 @@ export function Dashboard() {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      // Sort final matches by GPT score (highest first)
-      finalMatches.sort((a, b) => {
-        const scoreA = a.gptReasoning?.relevanceScore || 0;
-        const scoreB = b.gptReasoning?.relevanceScore || 0;
-        return scoreB - scoreA;
-      });
-      
-      setMatchedDocuments(finalMatches);
-
       // Save matches to database
       if (finalMatches.length > 0) {
         await saveMatchesToDatabase(finalMatches);
+        
+        // Fetch comment counts for all matched documents
+        fetchCommentCounts(finalMatches.map((match: MatchedDocument) => match.document));
       }
 
       if (finalMatches.length === 0) {
-        setError(`No documents found above GPT threshold of ${gptThreshold}/10 after semantic filtering`);
+        setError('No relevant documents found');
       }
 
     } catch (err) {
@@ -699,7 +731,7 @@ export function Dashboard() {
     // Prepare document text
     const documentText = `${document.title}\n\n${document.text || ''}`.trim();
     
-    const prompt = `You are an AI assistant analyzing government document relevance with a focus on potential impacts and creative connections.
+    const prompt = `You are an AI assistant analyzing government document relevance with a focus on potential impacts and ripple effects.
 
 PERSONA PROFILE:
 ${personaText}
@@ -710,12 +742,17 @@ Agency: ${document.agency_id || 'Unknown'}
 Type: ${document.document_type || 'Unknown'}
 Content: ${documentText}
 
-TASK: Analyze how this legislation or policy could potentially impact the persona above. Be CREATIVE and THOUGHTFUL about:
+LOCATION FILTERING RULE:
+- If this document mentions specific states, regions, or localities that do NOT include the persona's location (${persona.location || 'Unknown'}), automatically score this document 0-2 (irrelevant)
+- Only consider documents that either:
+  1. Apply to the persona's specific location (${persona.location || 'Unknown'})
+  2. Are federal/national in scope and apply everywhere
+  3. Don't specify geographic restrictions
+
+TASK: Analyze how this legislation or policy could potentially impact the persona above. Be THOUGHTFUL about:
 1. DIRECT impacts on the persona's interests, work, or life
 2. SECONDARY effects (how changes might ripple through their community, industry, or field)
-3. TERTIARY effects (broader societal changes that could eventually affect them)
-4. POTENTIAL opportunities or challenges that might emerge
-5. CREATIVE connections between seemingly unrelated policy areas
+3. POTENTIAL opportunities or challenges that might emerge
 
 SCORING GUIDELINES (be GENEROUS with relevance):
 - Score 6-10 for documents with ANY potential connection, even indirect ones
@@ -725,22 +762,19 @@ SCORING GUIDELINES (be GENEROUS with relevance):
 - Look for opportunities for civic engagement or professional development
 - Even tangential connections deserve consideration if they could have future impact
 
-IMPORTANT: Use the special thought process format. Start your thought process with "THOUGHT_PROCESS:" and end with "END_THOUGHT_PROCESS:". This allows extraction of your reasoning steps.
-
 RESPONSE FORMAT:
 Relevance Score: [1-10]
-Reasoning: [Your explanation focusing on potential impacts and creative connections]
-THOUGHT_PROCESS:
-[Your step-by-step analysis including direct, secondary, and tertiary effects]
-END_THOUGHT_PROCESS:`;
+Short Summary: [One sentence explaining why this document is relevant to the persona]
+Reasoning: [Your explanation focusing on potential impacts and ripple effects]`;
 
     const payload = {
       model: gptModel,
       prompt: prompt,
       stream: false,
+      reasoning_level: "low",
       options: {
-        temperature: 0.7,
-        top_p: 0.9
+        temperature: 0.3,
+        top_p: 0.8
       }
     };
 
@@ -755,6 +789,9 @@ END_THOUGHT_PROCESS:`;
 
     if (!response.ok) {
       const errorText = await response.text();
+      if (response.status === 0 || response.status >= 500) {
+        throw new Error(`Cannot connect to GPT model at ${url}. Please check if the model is running.`);
+      }
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
 
@@ -763,21 +800,134 @@ END_THOUGHT_PROCESS:`;
 
     // Parse the response
     const scoreMatch = responseText.match(/Relevance Score:\s*(\d+)/i);
-    const reasoningMatch = responseText.match(/Reasoning:\s*([^]*?)(?=THOUGHT_PROCESS:|$)/i);
-    const thoughtProcessMatch = responseText.match(/THOUGHT_PROCESS:\s*([^]*?)END_THOUGHT_PROCESS:/i);
+    const shortSummaryMatch = responseText.match(/Short Summary:\s*([^]*?)(?=Reasoning:|$)/i);
+    const reasoningMatch = responseText.match(/Reasoning:\s*([^]*?)$/i);
 
     const relevanceScore = scoreMatch ? parseInt(scoreMatch[1]) : 5;
+    const shortSummary = shortSummaryMatch ? shortSummaryMatch[1].trim() : 'No summary provided';
     const reasoning = reasoningMatch ? reasoningMatch[1].trim() : 'No reasoning provided';
-    const thoughtProcess = thoughtProcessMatch ? thoughtProcessMatch[1].trim() : 'No thought process provided';
 
     return {
       relevanceScore: Math.max(1, Math.min(10, relevanceScore)), // Clamp between 1-10
+      shortSummary: shortSummary,
       reasoning: reasoning,
-      thoughtProcess: thoughtProcess
+      thoughtProcess: '' // No longer used
     };
   };
 
 
+
+
+
+  // Function to fetch comment counts for all matched documents (optimized for performance)
+  const fetchCommentCounts = async (documents: any[]) => {
+    try {
+      // Check if comment counts are enabled
+      if (!enableCommentCounts) {
+        console.log('Comment counts disabled, skipping fetch');
+        return;
+      }
+      
+      const savedConfig = localStorage.getItem('navi-regulations-api-config');
+      if (!savedConfig) {
+        console.log('No regulations.gov API key configured, skipping comment count fetch');
+        return;
+      }
+      
+      const config = JSON.parse(savedConfig);
+      const apiKey = config.apiKey;
+      if (!apiKey) {
+        console.log('No regulations.gov API key found, skipping comment count fetch');
+        return;
+      }
+
+      console.log('Fetching comment counts for', documents.length, 'documents (optimized)');
+      setIsLoadingCommentCounts(true);
+      
+      // Process documents in batches to avoid overwhelming the API
+      const batchSize = 3; // Process 3 documents at a time
+      const delayBetweenBatches = 1000; // 1 second delay between batches
+      
+      for (let i = 0; i < documents.length; i += batchSize) {
+        const batch = documents.slice(i, i + batchSize);
+        
+        // Process batch concurrently
+        const batchPromises = batch.map(async (doc) => {
+          try {
+            const count = await getDocumentCommentCount(doc.document_id, apiKey);
+            return { documentId: doc.document_id, count };
+          } catch (error) {
+            console.warn(`Failed to get comment count for document ${doc.document_id}:`, error);
+            return { documentId: doc.document_id, count: 0 };
+          }
+        });
+        
+        // Wait for batch to complete
+        const batchResults = await Promise.all(batchPromises);
+        
+        // Update state with batch results (progressive loading)
+        setDocumentCommentCounts(prevCounts => {
+          const newCounts = { ...prevCounts };
+          batchResults.forEach(result => {
+            newCounts[result.documentId] = result.count;
+          });
+          return newCounts;
+        });
+        
+        // Add delay between batches (except for the last batch)
+        if (i + batchSize < documents.length) {
+          await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
+        }
+      }
+      
+      console.log('Comment counts fetching completed');
+      
+    } catch (error) {
+      console.error('Error fetching comment counts:', error);
+    } finally {
+      setIsLoadingCommentCounts(false);
+    }
+  };
+
+  // Function to handle viewing comments
+  const handleViewComments = async (documentId: string, documentTitle: string, docketId?: string) => {
+    // If no docket_id provided, try to derive it from document_id
+    const effectiveDocketId = docketId || deriveDocketId(documentId);
+    
+    console.log('View Comments clicked:', {
+      documentId,
+      originalDocketId: docketId,
+      derivedDocketId: effectiveDocketId
+    });
+    
+    if (!effectiveDocketId) {
+      setError('No docket ID available for this document. The document may not have public comments or the docket ID cannot be determined from the document ID.');
+      return;
+    }
+
+    setSelectedDocumentForComments({ id: documentId, title: documentTitle, docket_id: effectiveDocketId });
+    setLoadingComments(true);
+    setShowComments(true);
+    setDocumentComments([]);
+    setError(null); // Clear any previous errors
+
+    try {
+      const comments = await fetchCommentsFromRegulationsGov(effectiveDocketId, documentId);
+      setDocumentComments(comments);
+    } catch (error) {
+      console.error('Error loading comments:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load comments from regulations.gov';
+      setError(errorMessage);
+    } finally {
+      setLoadingComments(false);
+    }
+  };
+
+  const handleCloseComments = () => {
+    setShowComments(false);
+    setSelectedDocumentForComments(null);
+    setDocumentComments([]);
+  };
 
   // Comment drafting functions
   const handleStartComment = (documentId: string, documentTitle: string) => {
@@ -891,12 +1041,39 @@ END_THOUGHT_PROCESS:`;
           )}
 
 
+          {/* Top K Input */}
+          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <label style={{ fontSize: '14px', color: '#B8B8B8', fontWeight: 500 }}>
+              Top K Documents:
+            </label>
+            <input
+              type="number"
+              value={topK}
+              onChange={(e) => setTopK(Math.max(1, Math.min(100, parseInt(e.target.value) || 20)))}
+              min="1"
+              max="100"
+              style={{
+                background: '#2A2A2A',
+                border: '1px solid #444',
+                borderRadius: 4,
+                padding: '6px 8px',
+                color: '#FAFAFA',
+                fontSize: '14px',
+                width: '80px'
+              }}
+            />
+          </div>
+
           {/* Action Buttons */}
           <div style={{ marginTop: 16, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             
             
               <button
-              onClick={embedAllDocuments}
+              onClick={async () => {
+                // Clear embeddings first, then embed documents
+                await clearDocumentEmbeddings();
+                await embedAllDocuments();
+              }}
               disabled={isEmbeddingDocuments || documents.length === 0}
                 style={{
                 background: (isEmbeddingDocuments || documents.length === 0) ? '#444' : '#2A3C4A',
@@ -909,25 +1086,27 @@ END_THOUGHT_PROCESS:`;
                 opacity: (isEmbeddingDocuments || documents.length === 0) ? 0.5 : 1
                 }}
               >
-              {isEmbeddingDocuments ? `Embedding... (${documentEmbeddingProgress.current}/${documentEmbeddingProgress.total})` : `Embed Documents (${documents.length})`}
+              {isEmbeddingDocuments ? `Embedding... (${documentEmbeddingProgress.current}/${documentEmbeddingProgress.total})` : `Find Matches (${documents.length})`}
               </button>
               
-              <button
-                onClick={clearDocumentEmbeddings}
-                disabled={isEmbeddingDocuments}
-                style={{
-                  background: isEmbeddingDocuments ? '#444' : '#6B2C2C',
-                  color: '#FAFAFA',
-                  border: '1px solid #555',
-                  borderRadius: 6,
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                  cursor: isEmbeddingDocuments ? 'not-allowed' : 'pointer',
-                  opacity: isEmbeddingDocuments ? 0.5 : 1
-                }}
-              >
-                Clear Embeddings
-              </button>
+              {/* Comment Count Toggle */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  id="enableCommentCounts"
+                  checked={enableCommentCounts}
+                  onChange={(e) => setEnableCommentCounts(e.target.checked)}
+                  style={{ margin: 0 }}
+                />
+                <label htmlFor="enableCommentCounts" style={{ 
+                  fontSize: '12px', 
+                  color: '#B8B8B8', 
+                  cursor: 'pointer',
+                  userSelect: 'none'
+                }}>
+                  Show comment counts
+                </label>
+              </div>
             
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <button
@@ -944,7 +1123,7 @@ END_THOUGHT_PROCESS:`;
                     opacity: (isLoading || !persona?.embedding || documents.length === 0) ? 0.5 : 1
                   }}
                 >
-                  {isLoading ? (isGeneratingReasoning ? `Analyzing... (${reasoningProgress.current}/${reasoningProgress.total})` : 'Finding...') : 'Find Matches'}
+                  {isLoading ? (isGeneratingReasoning ? `Analyzing... (${reasoningProgress.current}/${reasoningProgress.total})` : 'Finding...') : `Analyze Top ${topK} Matches`}
                 </button>
               </div>
             
@@ -966,7 +1145,7 @@ END_THOUGHT_PROCESS:`;
                     cursor: 'pointer'
                   }}
                 >
-                  Stop GPT Analysis
+                  Stop Analysis
                 </button>
               )}
           </div>
@@ -984,7 +1163,10 @@ END_THOUGHT_PROCESS:`;
             </div>
             
             <div style={{ display: 'grid', gap: 16 }}>
-              {matchedDocuments.map((match) => (
+              {matchedDocuments.map((match) => {
+                // Debug: Log document structure to see what fields are available
+                console.log('Document fields for', match.document.title, ':', Object.keys(match.document));
+                return (
                 <div key={match.document.document_id} style={{
                   background: '#1A1A1A',
                   border: '1px solid #333',
@@ -992,18 +1174,14 @@ END_THOUGHT_PROCESS:`;
                   padding: 20,
                   position: 'relative'
                 }}>
-                  {/* Similarity Score Badge */}
-                  <div style={{
-                    position: 'absolute',
-                    top: 16,
-                    right: 16,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 4
-                  }}>
+                  {/* GPT Score Badge */}
+                  {match.gptReasoning && (
                     <div style={{
-                      background: match.similarityScore >= 0.9 ? '#4CAF50' : 
-                                 match.similarityScore >= 0.8 ? '#FFA726' : '#FF6B6B',
+                      position: 'absolute',
+                      top: 16,
+                      right: 16,
+                      background: match.gptReasoning.relevanceScore >= 8 ? '#4CAF50' : 
+                                 match.gptReasoning.relevanceScore >= 6 ? '#FFA726' : '#FF6B6B',
                       color: '#FAFAFA',
                       padding: '4px 8px',
                       borderRadius: 6,
@@ -1011,25 +1189,11 @@ END_THOUGHT_PROCESS:`;
                       fontWeight: 600,
                       textAlign: 'center'
                     }}>
-                      Semantic: {(match.similarityScore * 10).toFixed(1)}/10
+                      {match.gptReasoning.relevanceScore}/10
                     </div>
-                    {match.gptReasoning && (
-                      <div style={{
-                        background: match.gptReasoning.relevanceScore >= 8 ? '#4CAF50' : 
-                                   match.gptReasoning.relevanceScore >= 6 ? '#FFA726' : '#FF6B6B',
-                        color: '#FAFAFA',
-                        padding: '4px 8px',
-                        borderRadius: 6,
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        textAlign: 'center'
-                      }}>
-                        GPT: {match.gptReasoning.relevanceScore}/10
-                      </div>
-                    )}
-                  </div>
+                  )}
 
-                  <div style={{ marginRight: 80 }}>
+                  <div style={{ marginRight: 60 }}>
                     <h4 style={{ 
                       margin: '0 0 8px 0', 
                       fontSize: '16px', 
@@ -1039,149 +1203,104 @@ END_THOUGHT_PROCESS:`;
                       {match.document.title}
                     </h4>
                     
-                    <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
-                      <span style={{ 
-                        background: '#2A2A2A', 
-                        color: '#B8B8B8', 
-                        padding: '4px 8px', 
-                        borderRadius: 4, 
-                        fontSize: '12px' 
+                    {/* Comment Count Badge */}
+                    {documentCommentCounts[match.document.document_id] !== undefined ? (
+                      <div style={{
+                        display: 'inline-block',
+                        background: documentCommentCounts[match.document.document_id] > 0 ? '#3C362A' : '#2A2A2A',
+                        color: documentCommentCounts[match.document.document_id] > 0 ? '#FAFAFA' : '#666',
+                        padding: '2px 8px',
+                        borderRadius: 4,
+                        fontSize: '11px',
+                        fontWeight: 500,
+                        marginBottom: 8,
+                        border: documentCommentCounts[match.document.document_id] > 0 ? '1px solid #5D4E37' : '1px solid #333'
                       }}>
-                        {match.document.agency_id}
-                      </span>
-                      <span style={{ 
-                        background: '#2A2A2A', 
-                        color: '#B8B8B8', 
-                        padding: '4px 8px', 
-                        borderRadius: 4, 
-                        fontSize: '12px' 
-                      }}>
-                        {match.document.document_type}
-                      </span>
-                        <span style={{ 
-                        background: '#2A4A2A', 
-                        color: '#4CAF50', 
-                          padding: '4px 8px', 
-                          borderRadius: 4, 
-                          fontSize: '12px' 
-                        }}>
-                        Semantic Match
-                        </span>
-                    </div>
-
-                    {match.relevanceReason && (
-                      <div style={{ 
-                        background: '#2A2A2A', 
-                        padding: 12, 
-                        borderRadius: 8, 
-                        marginBottom: 12,
-                        borderLeft: '3px solid #4CAF50'
-                      }}>
-                        <div style={{ fontSize: '12px', color: '#4CAF50', fontWeight: 600, marginBottom: 4 }}>
-                          Why this is relevant:
-                        </div>
-                        <div style={{ fontSize: '14px', color: '#B8B8B8' }}>
-                          {match.relevanceReason}
-                        </div>
+                        {documentCommentCounts[match.document.document_id]} comment{documentCommentCounts[match.document.document_id] !== 1 ? 's' : ''}
                       </div>
+                    ) : isLoadingCommentCounts ? (
+                      <div style={{
+                        display: 'inline-block',
+                        background: '#2A2A2A',
+                        color: '#666',
+                        padding: '2px 8px',
+                        borderRadius: 4,
+                        fontSize: '11px',
+                        fontWeight: 500,
+                        marginBottom: 8,
+                        border: '1px solid #333'
+                      }}>
+                        Loading...
+                      </div>
+                    ) : null}
+                    
+                    {match.gptReasoning?.shortSummary && (
+                      <p style={{ 
+                        margin: '0 0 12px 0', 
+                        fontSize: '14px', 
+                        color: '#B8B8B8',
+                        lineHeight: '1.4',
+                        fontStyle: 'italic'
+                      }}>
+                        {match.gptReasoning.shortSummary}
+                      </p>
                     )}
-
-                    {match.gptReasoning && (
-                      <div style={{ 
-                        background: '#2A2A2A', 
-                        padding: 12, 
-                        borderRadius: 8, 
-                        marginBottom: 12,
-                        borderLeft: '3px solid #FFA726'
-                      }}>
-                        <div style={{ fontSize: '12px', color: '#FFA726', fontWeight: 600, marginBottom: 4 }}>
-                          GPT Analysis (Score: {match.gptReasoning.relevanceScore}/10):
-                        </div>
-                        <div style={{ fontSize: '14px', color: '#B8B8B8', marginBottom: 8 }}>
-                          {match.gptReasoning.reasoning}
-                        </div>
-                        <details style={{ fontSize: '12px', color: '#888' }}>
-                          <summary style={{ cursor: 'pointer', color: '#FFA726', fontWeight: 600 }}>
-                            View Thought Process
-                          </summary>
-                          <div style={{ 
-                            marginTop: 8, 
-                            padding: 8, 
-                            background: '#1A1A1A', 
-                            borderRadius: 4,
-                            whiteSpace: 'pre-wrap',
-                            fontFamily: 'monospace',
-                            fontSize: '11px',
-                            lineHeight: '1.4'
-                          }}>
-                            {match.gptReasoning.thoughtProcess}
-                          </div>
-                        </details>
-                      </div>
-                    )}
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-                      <div style={{ fontSize: '14px', color: '#B8B8B8' }}>
-                        Document ID: {match.document.document_id}
-                      </div>
-                      
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button
-                          onClick={() => handleStartComment(match.document.document_id, match.document.title)}
+                    
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => handleStartComment(match.document.document_id, match.document.title)}
+                        style={{
+                          background: '#4CAF50',
+                          color: '#FAFAFA',
+                          border: 'none',
+                          padding: '8px 16px',
+                          borderRadius: 6,
+                          fontSize: '14px',
+                          fontWeight: 500,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        See More
+                      </button>
+                      <button
+                        onClick={() => handleViewComments(match.document.document_id, match.document.title, match.document.docket_id)}
+                        style={{
+                          background: '#3C362A',
+                          color: '#FAFAFA',
+                          border: 'none',
+                          padding: '8px 16px',
+                          borderRadius: 6,
+                          fontSize: '14px',
+                          fontWeight: 500,
+                          cursor: 'pointer'
+                        }}
+                        title="View public comments for this document (docket ID will be derived from document ID)"
+                      >
+                        View Comments
+                      </button>
+                      {match.document.web_document_link && (
+                        <a 
+                          href={match.document.web_document_link} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
                           style={{
-                            background: '#4CAF50',
-                            color: '#FAFAFA',
-                            border: 'none',
+                            background: '#2A2A2A',
+                            color: '#B8B8B8',
                             padding: '8px 16px',
                             borderRadius: 6,
+                            textDecoration: 'none',
                             fontSize: '14px',
-                            fontWeight: 500,
-                            cursor: 'pointer'
+                            border: '1px solid #444'
                           }}
                         >
-                          Draft Comment
-                        </button>
-                        {match.document.web_comment_link && (
-                          <a 
-                            href={match.document.web_comment_link} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            style={{
-                              background: '#3C362A',
-                              color: '#FAFAFA',
-                              padding: '8px 16px',
-                              borderRadius: 6,
-                              textDecoration: 'none',
-                              fontSize: '14px',
-                              fontWeight: 500
-                            }}
-                          >
-                            External Comment
-                          </a>
-                        )}
-                        {match.document.web_document_link && (
-                          <a 
-                            href={match.document.web_document_link} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            style={{
-                              background: '#2A2A2A',
-                              color: '#B8B8B8',
-                              padding: '8px 16px',
-                              borderRadius: 6,
-                              textDecoration: 'none',
-                              fontSize: '14px',
-                              border: '1px solid #444'
-                            }}
-                          >
-                            View Details
-                          </a>
-                        )}
-                      </div>
+                          View Document
+                        </a>
+                      )}
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -1242,6 +1361,123 @@ END_THOUGHT_PROCESS:`;
           onClose={handleCloseCommentDrafting}
           onCommentSubmitted={handleCommentSubmitted}
         />
+      )}
+
+      {/* Comments Viewing Modal */}
+      {showComments && selectedDocumentForComments && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: 20
+        }}>
+          <div style={{
+            background: '#1A1A1A',
+            border: '1px solid #333',
+            borderRadius: 12,
+            width: '100%',
+            maxWidth: '800px',
+            height: '80vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid #333',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexShrink: 0
+            }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 600 }}>
+                  Public Comments
+                </h2>
+                <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: '#B8B8B8' }}>
+                  {selectedDocumentForComments.title}
+                </p>
+              </div>
+              <button
+                onClick={handleCloseComments}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#B8B8B8',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  padding: '4px'
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Content */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+              {loadingComments ? (
+                <div style={{ textAlign: 'center', color: '#B8B8B8', fontSize: '14px' }}>
+                  Loading comments from regulations.gov...
+                </div>
+              ) : documentComments.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {documentComments.map((comment, index) => (
+                    <div key={index} style={{
+                      background: '#2A2A2A',
+                      border: '1px solid #444',
+                      borderRadius: 8,
+                      padding: 16
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <span style={{ fontSize: '12px', color: '#4CAF50', fontWeight: 600 }}>
+                          Comment #{index + 1}
+                        </span>
+                        {(comment.attributes?.postedDate || comment.attributes?.datePosted) && (
+                          <span style={{ fontSize: '12px', color: '#666' }}>
+                            {new Date(comment.attributes.postedDate || comment.attributes.datePosted).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#FAFAFA', lineHeight: '1.5' }}>
+                        {comment.attributes?.comment || comment.attributes?.commentText || 'No comment text available'}
+                      </div>
+                      {(comment.attributes?.submitterName || comment.attributes?.organizationName) && (
+                        <div style={{ fontSize: '12px', color: '#B8B8B8', marginTop: 8, fontStyle: 'italic' }}>
+                          — {comment.attributes.submitterName || comment.attributes.organizationName}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {documentComments.length === 30 && (
+                    <div style={{
+                      background: '#3C362A',
+                      border: '1px solid #5D4E37',
+                      borderRadius: 8,
+                      padding: 12,
+                      textAlign: 'center',
+                      fontSize: '12px',
+                      color: '#B8B8B8'
+                    }}>
+                      Showing 30 most recent comments. This document may have more comments available.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', color: '#B8B8B8', fontSize: '14px' }}>
+                  No public comments found for this document.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

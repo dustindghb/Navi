@@ -58,7 +58,15 @@ type PersonaData = {
 };
 
 export function Persona() {
-  const [persona, setPersona] = useState<PersonaData>({ role: '' });
+  const [persona, setPersona] = useState<PersonaData>({ 
+    name: 'Sarah Martinez',
+    role: 'Small Business Owner & Healthcare Provider',
+    location: 'Texas',
+    ageRange: '35-44',
+    employmentStatus: 'Self-employed',
+    industry: 'Telehealth Services & Medical Practice',
+    additionalContext: 'I run a small telehealth practice serving rural communities in Texas. I need to stay updated on HIPAA compliance requirements, telehealth regulations, and any new rules that could affect how I provide remote medical services to my patients. I also need to track changes to Medicare reimbursement rates and state medical licensing requirements. When new regulations are proposed, I want to submit public comments to share how they would impact small practices like mine. I don\'t have time to manually search through hundreds of government websites, so I need a tool that can automatically find relevant documents and help me understand what they mean for my business. I\'m also an environmental activist in my community and care about climate change policies, clean air regulations, and renewable energy standards that could affect public health in rural areas.'
+  });
   const [saving, setSaving] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
@@ -69,9 +77,29 @@ export function Persona() {
   const [embeddingError, setEmbeddingError] = useState<string | null>(null);
   
   // Policy interest categories
-  const [selectedPolicyInterests, setSelectedPolicyInterests] = useState<string[]>([]);
-  const [selectedAgencies, setSelectedAgencies] = useState<string[]>([]);
-  const [selectedImpactLevels, setSelectedImpactLevels] = useState<string[]>([]);
+  const [selectedPolicyInterests, setSelectedPolicyInterests] = useState<string[]>([
+    'Healthcare Data Privacy (HIPAA)',
+    'Telehealth & Digital Health',
+    'Drug Approval & Safety',
+    'Medical Device Regulations',
+    'Climate Change & Carbon Emissions',
+    'Air Quality Regulations',
+    'Renewable Energy Standards',
+    'Data Privacy & Protection',
+    'Cybersecurity Standards'
+  ]);
+  const [selectedAgencies, setSelectedAgencies] = useState<string[]>([
+    'Food and Drug Administration (FDA)',
+    'Department of Health and Human Services (HHS)',
+    'Centers for Medicare & Medicaid Services (CMS)',
+    'Centers for Disease Control and Prevention (CDC)',
+    'Health Resources and Services Administration (HRSA)',
+    'Environmental Protection Agency (EPA)',
+    'Department of Energy (DOE)',
+    'Federal Trade Commission (FTC)',
+    'Small Business Administration (SBA)'
+  ]);
+  const [selectedImpactLevels, setSelectedImpactLevels] = useState<string[]>(['Federal', 'State', 'Local']);
 
   // Load saved persona data on component mount
   useEffect(() => {

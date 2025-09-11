@@ -15,6 +15,7 @@ import {
   FormControlLabel
 } from '@mui/material';
 // import { Grid } from '@mui/material';
+import { testRegulationsApiConnection } from '../utils/regulationsGovApi';
 import { 
   Close as CloseIcon,
   // Save as SaveIcon,
@@ -120,6 +121,12 @@ export function Settings() {
   const [embeddingError, setEmbeddingError] = useState<string | null>(null);
   const [embeddingTestResult, setEmbeddingTestResult] = useState<any>(null);
 
+  // Regulations.gov API Configuration (new)
+  const [regulationsApiKey, setRegulationsApiKey] = useState('');
+  const [isTestingRegulationsApi, setIsTestingRegulationsApi] = useState(false);
+  const [regulationsApiError, setRegulationsApiError] = useState<string | null>(null);
+  const [regulationsApiTestResult, setRegulationsApiTestResult] = useState<string | null>(null);
+
   // Load saved data on component mount and auto-fetch API data only if localStorage is empty
   useEffect(() => {
     loadSavedData();
@@ -127,6 +134,7 @@ export function Settings() {
     loadLocalEmbeddingConfig();
     loadRemoteOllamaConfig();
     loadRemoteEmbeddingConfig();
+    loadRegulationsApiConfig();
     // Check if documents exist in database before auto-fetching
     const timer = setTimeout(async () => {
       try {
@@ -204,6 +212,13 @@ export function Settings() {
       saveRemoteEmbeddingConfig();
     }
   }, [remoteEmbeddingHost, remoteEmbeddingPort, remoteEmbeddingModel, remoteEmbeddingTestText]);
+
+  // Save regulations API config when values change
+  useEffect(() => {
+    if (regulationsApiKey !== undefined) {
+      saveRegulationsApiConfig();
+    }
+  }, [regulationsApiKey]);
 
   const loadSavedData = () => {
     try {
@@ -354,6 +369,32 @@ export function Settings() {
       console.log('Saved remote embedding config to localStorage:', config);
     } catch (err) {
       console.error('Error saving remote embedding config:', err);
+    }
+  };
+
+  const loadRegulationsApiConfig = () => {
+    try {
+      const saved = localStorage.getItem('navi-regulations-api-config');
+      if (saved) {
+        const config = JSON.parse(saved);
+        if (config.apiKey) setRegulationsApiKey(config.apiKey);
+        console.log('Loaded regulations API config from localStorage:', config);
+      }
+    } catch (err) {
+      console.error('Error loading regulations API config:', err);
+    }
+  };
+
+  const saveRegulationsApiConfig = () => {
+    try {
+      const config = {
+        apiKey: regulationsApiKey,
+        _saved_at: new Date().toISOString()
+      };
+      localStorage.setItem('navi-regulations-api-config', JSON.stringify(config));
+      console.log('Saved regulations API config to localStorage:', config);
+    } catch (err) {
+      console.error('Error saving regulations API config:', err);
     }
   };
 
@@ -1449,6 +1490,31 @@ export function Settings() {
     }
   };
 
+  const handleTestRegulationsApi = async () => {
+    setIsTestingRegulationsApi(true);
+    setRegulationsApiError(null);
+    setRegulationsApiTestResult(null);
+
+    if (!regulationsApiKey) {
+      setRegulationsApiError('Please enter your regulations.gov API key first');
+      setIsTestingRegulationsApi(false);
+      return;
+    }
+
+    console.log('=== REGULATIONS.GOV API TEST START ===');
+    
+    try {
+      const result = await testRegulationsApiConnection(regulationsApiKey);
+      setRegulationsApiTestResult(`✅ ${result}`);
+    } catch (err) {
+      console.error('Regulations.gov API test error:', err);
+      setRegulationsApiError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsTestingRegulationsApi(false);
+      console.log('=== REGULATIONS.GOV API TEST END ===');
+    }
+  };
+
 
   // Helper Components for Local Ollama
   const StatusItem = ({ label, value, extra = '', type = 'ok' }: { 
@@ -2211,6 +2277,71 @@ export function Settings() {
           </Box>
         </Paper>
 
+        {/* Regulations.gov API Configuration Panel */}
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              Regulations.gov API Configuration
+            </Typography>
+          </Box>
+          
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Configure your regulations.gov API key to enable viewing public comments on policy documents.
+            <br/>
+            <em>Get your free API key at: <a href="https://regulations.gov/api" target="_blank" rel="noopener noreferrer" style={{ color: '#4CAF50' }}>https://regulations.gov/api</a></em>
+            <br/>
+            <strong>Note:</strong> Regulations.gov has restricted API access. If you get "access denied" errors, you may need to contact their support to enable your API key for comment access.
+          </Typography>
+
+          {regulationsApiError && (
+            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setRegulationsApiError(null)}>
+              {regulationsApiError}
+            </Alert>
+          )}
+
+          <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <Box sx={{ flex: 1, minWidth: 300 }}>
+              <TextField
+                fullWidth
+                label="Regulations.gov API Key"
+                value={regulationsApiKey}
+                onChange={(e) => setRegulationsApiKey(e.target.value)}
+                placeholder="Enter your regulations.gov API key"
+                variant="outlined"
+                type="password"
+                helperText="Your API key will be saved locally and used to fetch public comments"
+              />
+            </Box>
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={handleTestRegulationsApi}
+              disabled={isTestingRegulationsApi || !regulationsApiKey}
+            >
+              {isTestingRegulationsApi ? 'Testing...' : 'Test API Key'}
+            </Button>
+          </Box>
+
+          {regulationsApiTestResult && (
+            <Alert severity="success" sx={{ mb: 2 }}>
+              <Typography variant="body2">
+                {regulationsApiTestResult}
+              </Typography>
+            </Alert>
+          )}
+
+          <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1, border: '1px solid #333' }}>
+            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+              API Configuration:
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+              Endpoint: https://api.regulations.gov/v4/comments<br/>
+              Method: Two-step process (list IDs, then fetch details)<br/>
+              Usage: Fetch public comments for policy documents<br/>
+              Features: Real-time comment data, Agency filtering, Date sorting, Full comment text
+            </Typography>
+          </Box>
+        </Paper>
 
         {/* Detection Results */}
         {detectRes && (
