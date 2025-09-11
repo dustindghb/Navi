@@ -170,10 +170,26 @@ export function Persona() {
       throw new Error('No persona data available for embedding');
     }
     
-    // Get remote embedding configuration from localStorage
-    const remoteEmbeddingHost = localStorage.getItem('remoteEmbeddingHost') || '10.0.4.52';
-    const remoteEmbeddingPort = localStorage.getItem('remoteEmbeddingPort') || '11434';
-    const remoteEmbeddingModel = localStorage.getItem('remoteEmbeddingModel') || 'nomic-embed-text:latest';
+    // Get remote embedding configuration from localStorage (same format as Settings.tsx)
+    let remoteEmbeddingHost = '10.0.4.52';
+    let remoteEmbeddingPort = '11434';
+    let remoteEmbeddingModel = '';
+    
+    try {
+      const saved = localStorage.getItem('navi-remote-embedding-config');
+      if (saved) {
+        const config = JSON.parse(saved);
+        if (config.host) remoteEmbeddingHost = config.host;
+        if (config.port) remoteEmbeddingPort = config.port;
+        if (config.model) remoteEmbeddingModel = config.model;
+      }
+    } catch (err) {
+      console.error('Error loading remote embedding config:', err);
+    }
+    
+    if (!remoteEmbeddingModel) {
+      throw new Error('Remote embedding model not configured. Please set the model in Settings.');
+    }
     
     const url = `http://${remoteEmbeddingHost}:${remoteEmbeddingPort}/api/embeddings`;
     const payload = {

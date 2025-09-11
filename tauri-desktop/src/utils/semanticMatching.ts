@@ -119,7 +119,7 @@ export const generateRemotePersonaEmbedding = async (
   persona: PersonaData,
   host: string = '10.0.4.52',
   port: string = '11434',
-  model: string = 'nomic-embed-text:latest'
+  model: string = ''
 ): Promise<number[]> => {
   const personaText = preparePersonaForEmbedding(persona);
   
@@ -169,7 +169,7 @@ export const generateLocalPersonaEmbedding = async (
   persona: PersonaData,
   host: string = '127.0.0.1',
   port: string = '11435',
-  model: string = 'nomic-embed-text:latest'
+  model: string = ''
 ): Promise<number[]> => {
   const personaText = preparePersonaForEmbedding(persona);
   
@@ -234,10 +234,10 @@ export const performSemanticMatching = async (
     useRemote = true,
     remoteHost = '10.0.4.52',
     remotePort = '11434',
-    remoteModel = 'nomic-embed-text:latest',
+    remoteModel = '',
     localHost = '127.0.0.1',
     localPort = '11435',
-    localModel = 'nomic-embed-text:latest',
+    localModel = '',
     similarityThreshold = 0.7,
     maxResults = 10
   } = options;

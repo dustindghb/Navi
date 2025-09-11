@@ -1,10 +1,3 @@
-"""
-Ultra-simple Navi Backend API
-
-This version uses only built-in Python libraries and SQLite
-to avoid dependency issues.
-"""
-
 import sqlite3
 import json
 from datetime import datetime
@@ -61,6 +54,7 @@ def init_db():
             web_docket_link TEXT,
             docket_id TEXT,
             embedding TEXT,
+            chunk_embeddings TEXT,
             posted_date TIMESTAMP,
             comment_end_date TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -118,6 +112,14 @@ def init_db():
     # Add embedding column to personas if it doesn't exist (migration)
     try:
         cursor.execute("ALTER TABLE personas ADD COLUMN embedding TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        # Column already exists, ignore
+        pass
+    
+    # Add chunk_embeddings column to documents if it doesn't exist (migration)
+    try:
+        cursor.execute("ALTER TABLE documents ADD COLUMN chunk_embeddings TEXT")
         conn.commit()
     except sqlite3.OperationalError:
         # Column already exists, ignore
@@ -231,7 +233,11 @@ class APIHandler(BaseHTTPRequestHandler):
         if content_length:
             content_length = int(content_length)
             post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
+            # Special case for clear-embeddings endpoint that doesn't need JSON data
+            if path == '/documents/clear-embeddings':
+                data = {}
+            else:
+                data = json.loads(post_data.decode('utf-8'))
         else:
             data = {}
         
@@ -248,6 +254,9 @@ class APIHandler(BaseHTTPRequestHandler):
         elif path == '/documents/clear':
             self.clear_documents()
             
+        elif path == '/documents/clear-embeddings':
+            self.clear_document_embeddings()
+            
         elif path == '/api/upload':
             self.upload_api_data(data)
             
@@ -256,6 +265,9 @@ class APIHandler(BaseHTTPRequestHandler):
             
         elif path == '/documents/embedding':
             self.update_document_embedding(data)
+            
+        elif path == '/documents/chunk-embeddings':
+            self.update_document_chunk_embeddings(data)
             
         elif path == '/matched-documents':
             self.save_matched_documents(data)
@@ -275,7 +287,7 @@ class APIHandler(BaseHTTPRequestHandler):
         cursor.execute("""
             SELECT id, document_id, title, text, agency_id, 
                    document_type, web_comment_link, web_document_link, web_docket_link,
-                   docket_id, embedding, posted_date, comment_end_date
+                   docket_id, embedding, chunk_embeddings, posted_date, comment_end_date
             FROM documents
             ORDER BY posted_date DESC
             LIMIT ? OFFSET ?
@@ -291,6 +303,14 @@ class APIHandler(BaseHTTPRequestHandler):
                 except (json.JSONDecodeError, TypeError):
                     embedding = None
             
+            # Parse chunk_embeddings JSON if it exists
+            chunk_embeddings = None
+            if row[11]:  # chunk_embeddings field
+                try:
+                    chunk_embeddings = json.loads(row[11])
+                except (json.JSONDecodeError, TypeError):
+                    chunk_embeddings = None
+            
             results.append({
                 'id': row[0],
                 'document_id': row[1],
@@ -303,8 +323,9 @@ class APIHandler(BaseHTTPRequestHandler):
                 'web_docket_link': row[8],
                 'docket_id': row[9],
                 'embedding': embedding,
-                'posted_date': row[11],
-                'comment_end_date': row[12]
+                'chunk_embeddings': chunk_embeddings,
+                'posted_date': row[12],
+                'comment_end_date': row[13]
             })
         
         conn.close()
@@ -323,7 +344,7 @@ class APIHandler(BaseHTTPRequestHandler):
         cursor.execute("""
             SELECT id, document_id, title, text, agency_id, 
                    document_type, web_comment_link, web_document_link, web_docket_link,
-                   docket_id, embedding, posted_date, comment_end_date
+                   docket_id, embedding, chunk_embeddings, posted_date, comment_end_date
             FROM documents WHERE document_id = ?
         """, (document_id,))
         
@@ -339,6 +360,14 @@ class APIHandler(BaseHTTPRequestHandler):
                 except (json.JSONDecodeError, TypeError):
                     embedding = None
             
+            # Parse chunk_embeddings JSON if it exists
+            chunk_embeddings = None
+            if row[11]:  # chunk_embeddings field
+                try:
+                    chunk_embeddings = json.loads(row[11])
+                except (json.JSONDecodeError, TypeError):
+                    chunk_embeddings = None
+            
             result = {
                 'id': row[0],
                 'document_id': row[1],
@@ -351,8 +380,9 @@ class APIHandler(BaseHTTPRequestHandler):
                 'web_docket_link': row[8],
                 'docket_id': row[9],
                 'embedding': embedding,
-                'posted_date': row[11],
-                'comment_end_date': row[12]
+                'chunk_embeddings': chunk_embeddings,
+                'posted_date': row[12],
+                'comment_end_date': row[13]
             }
             
             self.send_response(200)
@@ -378,7 +408,7 @@ class APIHandler(BaseHTTPRequestHandler):
         cursor.execute("""
             SELECT id, document_id, title, text, agency_id, 
                    document_type, web_comment_link, web_document_link, web_docket_link,
-                   docket_id, embedding, posted_date, comment_end_date
+                   docket_id, embedding, chunk_embeddings, posted_date, comment_end_date
             FROM documents
             WHERE title LIKE ? OR text LIKE ?
             ORDER BY posted_date DESC
@@ -395,6 +425,14 @@ class APIHandler(BaseHTTPRequestHandler):
                 except (json.JSONDecodeError, TypeError):
                     embedding = None
             
+            # Parse chunk_embeddings JSON if it exists
+            chunk_embeddings = None
+            if row[11]:  # chunk_embeddings field
+                try:
+                    chunk_embeddings = json.loads(row[11])
+                except (json.JSONDecodeError, TypeError):
+                    chunk_embeddings = None
+            
             results.append({
                 'id': row[0],
                 'document_id': row[1],
@@ -407,8 +445,9 @@ class APIHandler(BaseHTTPRequestHandler):
                 'web_docket_link': row[8],
                 'docket_id': row[9],
                 'embedding': embedding,
-                'posted_date': row[11],
-                'comment_end_date': row[12]
+                'chunk_embeddings': chunk_embeddings,
+                'posted_date': row[12],
+                'comment_end_date': row[13]
             })
         
         conn.close()
@@ -800,6 +839,33 @@ class APIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(result).encode())
     
+    def clear_document_embeddings(self):
+        """Clear all document embeddings from the database"""
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        # Count documents with embeddings before clearing
+        cursor.execute("SELECT COUNT(*) FROM documents WHERE embedding IS NOT NULL OR chunk_embeddings IS NOT NULL")
+        count_before = cursor.fetchone()[0]
+        
+        # Clear all embeddings
+        cursor.execute("UPDATE documents SET embedding = NULL, chunk_embeddings = NULL")
+        
+        conn.commit()
+        conn.close()
+        
+        result = {
+            'success': True,
+            'cleared_embeddings_count': count_before,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps(result).encode())
+    
     def upload_api_data(self, data):
         """Upload API data with embeddings to database"""
         conn = sqlite3.connect(DB_FILE)
@@ -971,6 +1037,56 @@ class APIHandler(BaseHTTPRequestHandler):
                 'success': True,
                 'document_id': document_id,
                 'embedding_dimensions': len(embedding) if embedding else 0,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        else:
+            conn.close()
+            self.send_response(404)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Document not found"}).encode())
+    
+    def update_document_chunk_embeddings(self, data):
+        """Update document chunk embeddings"""
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        document_id = data.get('document_id')
+        chunk_embeddings = data.get('chunk_embeddings', [])
+        
+        if not document_id:
+            conn.close()
+            self.send_response(400)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "document_id is required"}).encode())
+            return
+        
+        # Convert chunk embeddings array to JSON string for storage
+        chunk_embeddings_json = json.dumps(chunk_embeddings) if chunk_embeddings else None
+        
+        cursor.execute("""
+            UPDATE documents 
+            SET chunk_embeddings = ?, created_at = CURRENT_TIMESTAMP
+            WHERE document_id = ?
+        """, (chunk_embeddings_json, document_id))
+        
+        if cursor.rowcount > 0:
+            conn.commit()
+            conn.close()
+            
+            result = {
+                'success': True,
+                'document_id': document_id,
+                'chunk_count': len(chunk_embeddings) if chunk_embeddings else 0,
                 'updated_at': datetime.now().isoformat()
             }
             

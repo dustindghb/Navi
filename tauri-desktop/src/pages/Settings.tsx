@@ -64,7 +64,7 @@ export function Settings() {
   // Remote Embedding Configuration (new)
   const [remoteEmbeddingHost, setRemoteEmbeddingHost] = useState('10.0.4.52');
   const [remoteEmbeddingPort, setRemoteEmbeddingPort] = useState('11434');
-  const [remoteEmbeddingModel, setRemoteEmbeddingModel] = useState('nomic-embed-text:latest');
+  const [remoteEmbeddingModel, setRemoteEmbeddingModel] = useState('');
   const [remoteEmbeddingTestText, setRemoteEmbeddingTestText] = useState('This is a test text for remote embedding generation');
   const [isTestingRemoteEmbedding, setIsTestingRemoteEmbedding] = useState(false);
   const [remoteEmbeddingError, setRemoteEmbeddingError] = useState<string | null>(null);
@@ -114,7 +114,7 @@ export function Settings() {
   const [useLocalEmbedding, setUseLocalEmbedding] = useState(false);
   const [embeddingHost, setEmbeddingHost] = useState('127.0.0.1');
   const [embeddingPort, setEmbeddingPort] = useState('11435');
-  const [embeddingModel, setEmbeddingModel] = useState('nomic-embed-text:latest');
+  const [embeddingModel, setEmbeddingModel] = useState('');
   const [embeddingTestText, setEmbeddingTestText] = useState('This is a test text for embedding generation');
   const [isTestingEmbedding, setIsTestingEmbedding] = useState(false);
   const [embeddingError, setEmbeddingError] = useState<string | null>(null);
@@ -125,16 +125,52 @@ export function Settings() {
     loadSavedData();
     loadLocalOllamaConfig();
     loadLocalEmbeddingConfig();
-    // Only auto-fetch API data if no saved data exists
-    const timer = setTimeout(() => {
-      const savedData = localStorage.getItem('navi-regulations-data');
-      if (!savedData) {
-        console.log('No saved data found, auto-fetching API data...');
+    loadRemoteOllamaConfig();
+    loadRemoteEmbeddingConfig();
+    // Check if documents exist in database before auto-fetching
+    const timer = setTimeout(async () => {
+      try {
+        // First check localStorage for saved data
+        const savedData = localStorage.getItem('navi-regulations-data');
+        if (savedData) {
+          console.log('✅ Saved data found in localStorage, skipping auto-fetch');
+          setHasAutoFetched(false);
+          return;
+        }
+
+        // Check if documents exist in database
+        console.log('No localStorage data found, checking database for existing documents...');
+        const response = await fetch('http://localhost:8001/documents?limit=1');
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Database response:', { isArray: Array.isArray(data), length: Array.isArray(data) ? data.length : 'N/A', type: typeof data });
+          
+          // The API returns documents directly as an array, not wrapped in an object
+          const documentCount = Array.isArray(data) ? data.length : 0;
+          
+          if (documentCount > 0) {
+            console.log(`✅ Found ${documentCount} document(s) in database, skipping auto-fetch`);
+            setHasAutoFetched(false);
+            return;
+          } else {
+            console.log('❌ No documents found in database');
+          }
+        } else {
+          console.log(`❌ Database check failed with status: ${response.status}`);
+        }
+        
+        // No documents found in database, auto-fetch from API
+        console.log('No documents found in database, auto-fetching API data...');
         setHasAutoFetched(true);
         fetchApiData(true); // Fetch all documents by default
-      } else {
-        console.log('Saved data found, skipping auto-fetch');
-        setHasAutoFetched(false);
+        
+      } catch (error) {
+        console.error('Error checking database for existing documents:', error);
+        // If database check fails, fall back to auto-fetch
+        console.log('Database check failed, auto-fetching API data as fallback...');
+        setHasAutoFetched(true);
+        fetchApiData(true);
       }
     }, 1000);
     
@@ -154,6 +190,20 @@ export function Settings() {
       saveLocalEmbeddingConfig();
     }
   }, [embeddingHost, embeddingPort, embeddingModel, embeddingTestText, useLocalEmbedding]);
+
+  // Save remote Ollama config when values change
+  useEffect(() => {
+    if (host || port || model || testMessage) {
+      saveRemoteOllamaConfig();
+    }
+  }, [host, port, model, testMessage]);
+
+  // Save remote embedding config when values change
+  useEffect(() => {
+    if (remoteEmbeddingHost || remoteEmbeddingPort || remoteEmbeddingModel || remoteEmbeddingTestText) {
+      saveRemoteEmbeddingConfig();
+    }
+  }, [remoteEmbeddingHost, remoteEmbeddingPort, remoteEmbeddingModel, remoteEmbeddingTestText]);
 
   const loadSavedData = () => {
     try {
@@ -240,6 +290,70 @@ export function Settings() {
       console.log('Saved local embedding config to localStorage:', config);
     } catch (err) {
       console.error('Error saving local embedding config:', err);
+    }
+  };
+
+  const loadRemoteOllamaConfig = () => {
+    try {
+      const saved = localStorage.getItem('navi-remote-ollama-config');
+      if (saved) {
+        const config = JSON.parse(saved);
+        if (config.host) setHost(config.host);
+        if (config.port) setPort(config.port);
+        if (config.model) setModel(config.model);
+        if (config.testMessage) setTestMessage(config.testMessage);
+        console.log('Loaded remote Ollama config from localStorage:', config);
+      }
+    } catch (err) {
+      console.error('Error loading remote Ollama config:', err);
+    }
+  };
+
+  const saveRemoteOllamaConfig = () => {
+    try {
+      const config = {
+        host: host,
+        port: port,
+        model: model,
+        testMessage: testMessage,
+        _saved_at: new Date().toISOString()
+      };
+      localStorage.setItem('navi-remote-ollama-config', JSON.stringify(config));
+      console.log('Saved remote Ollama config to localStorage:', config);
+    } catch (err) {
+      console.error('Error saving remote Ollama config:', err);
+    }
+  };
+
+  const loadRemoteEmbeddingConfig = () => {
+    try {
+      const saved = localStorage.getItem('navi-remote-embedding-config');
+      if (saved) {
+        const config = JSON.parse(saved);
+        if (config.host) setRemoteEmbeddingHost(config.host);
+        if (config.port) setRemoteEmbeddingPort(config.port);
+        if (config.model) setRemoteEmbeddingModel(config.model);
+        if (config.testText) setRemoteEmbeddingTestText(config.testText);
+        console.log('Loaded remote embedding config from localStorage:', config);
+      }
+    } catch (err) {
+      console.error('Error loading remote embedding config:', err);
+    }
+  };
+
+  const saveRemoteEmbeddingConfig = () => {
+    try {
+      const config = {
+        host: remoteEmbeddingHost,
+        port: remoteEmbeddingPort,
+        model: remoteEmbeddingModel,
+        testText: remoteEmbeddingTestText,
+        _saved_at: new Date().toISOString()
+      };
+      localStorage.setItem('navi-remote-embedding-config', JSON.stringify(config));
+      console.log('Saved remote embedding config to localStorage:', config);
+    } catch (err) {
+      console.error('Error saving remote embedding config:', err);
     }
   };
 

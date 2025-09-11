@@ -30,6 +30,7 @@ interface DocumentData {
   web_docket_link?: string;
   docket_id?: string;
   embedding?: number[];
+  chunk_embeddings?: number[][];
   posted_date?: string;
   comment_end_date?: string;
   created_at?: string;
@@ -130,45 +131,130 @@ export function Dashboard() {
   };
 
 
-  // Function to embed a single document
-  const embedDocument = async (document: DocumentData): Promise<number[]> => {
+  // Utility function to clean text by removing non-ASCII characters
+  const cleanText = (text: string): string => {
+    // Remove non-ASCII characters and normalize whitespace
+    return text
+      .replace(/[^\x00-\x7F]/g, '') // Remove non-ASCII characters
+      .replace(/\s+/g, ' ') // Normalize whitespace (multiple spaces to single space)
+      .trim(); // Remove leading/trailing whitespace
+  };
+
+  // Utility function to chunk text into smaller pieces based on word count
+  const chunkText = (text: string, maxWords: number = 1200): string[] => {
+    // Clean the text first
+    const cleanedText = cleanText(text);
+    
+    // Split text into words
+    const words = cleanedText.split(/\s+/).filter(word => word.length > 0);
+    
+    if (words.length <= maxWords) {
+      return [cleanedText];
+    }
+    
+    const chunks: string[] = [];
+    let currentChunk: string[] = [];
+    
+    for (const word of words) {
+      // If adding this word would exceed the limit, start a new chunk
+      if (currentChunk.length >= maxWords && currentChunk.length > 0) {
+        chunks.push(currentChunk.join(' '));
+        currentChunk = [word];
+      } else {
+        currentChunk.push(word);
+      }
+    }
+    
+    // Add the last chunk if it has content
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk.join(' '));
+    }
+    
+    return chunks;
+  };
+
+  // Function to embed a single document with chunking
+  const embedDocument = async (document: DocumentData): Promise<{embedding: number[], chunk_embeddings: number[][]}> => {
     const documentText = `${document.title}. ${document.text || ''}`.trim();
     
     if (!documentText) {
       throw new Error(`No content available for document ${document.document_id}`);
     }
     
-    // Get remote embedding configuration from localStorage
-    const remoteEmbeddingHost = localStorage.getItem('remoteEmbeddingHost') || '10.0.4.52';
-    const remoteEmbeddingPort = localStorage.getItem('remoteEmbeddingPort') || '11434';
-    const remoteEmbeddingModel = localStorage.getItem('remoteEmbeddingModel') || 'nomic-embed-text:latest';
+    // Get remote embedding configuration from localStorage (same format as Settings.tsx)
+    let remoteEmbeddingHost = '10.0.4.52';
+    let remoteEmbeddingPort = '11434';
+    let remoteEmbeddingModel = '';
     
+    try {
+      const saved = localStorage.getItem('navi-remote-embedding-config');
+      if (saved) {
+        const config = JSON.parse(saved);
+        if (config.host) remoteEmbeddingHost = config.host;
+        if (config.port) remoteEmbeddingPort = config.port;
+        if (config.model) remoteEmbeddingModel = config.model;
+      }
+    } catch (err) {
+      console.error('Error loading remote embedding config:', err);
+    }
+    
+    if (!remoteEmbeddingModel) {
+      throw new Error('Remote embedding model not configured. Please set the model in Settings.');
+    }
+    
+    // Use /api/embeddings endpoint for all models
     const url = `http://${remoteEmbeddingHost}:${remoteEmbeddingPort}/api/embeddings`;
-    const payload = {
-      model: remoteEmbeddingModel,
-      prompt: documentText
-    };
+    
+    // Always chunk documents to avoid truncation issues
+    const chunks = chunkText(documentText);
+    const chunkEmbeddings: number[][] = [];
+    
+    console.log(`Embedding document ${document.document_id} with ${chunks.length} chunks`);
+    
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      try {
+        const chunkPayload = {
+          model: remoteEmbeddingModel,
+          prompt: chunk
+        };
 
-    const response = await fetch(url, {
+        const chunkResponse = await fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(chunkPayload)
         });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
+        if (!chunkResponse.ok) {
+          const errorText = await chunkResponse.text();
+          throw new Error(`HTTP ${chunkResponse.status}: ${errorText}`);
+        }
 
-    const result = await response.json();
+        const chunkResult = await chunkResponse.json();
+        
+        if (!chunkResult.embedding || !Array.isArray(chunkResult.embedding)) {
+          throw new Error('Invalid embedding response format');
+        }
+
+        chunkEmbeddings.push(chunkResult.embedding);
+        
+        // Small delay to avoid overwhelming the embedding service
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } catch (error) {
+        console.error(`Failed to embed chunk ${i + 1} of document ${document.document_id}:`, error);
+        throw error;
+      }
+    }
     
-    if (!result.embedding || !Array.isArray(result.embedding)) {
-      throw new Error('Invalid embedding response format');
-    }
-
-    return result.embedding;
+    // Use the first chunk embedding as the main embedding
+    const finalEmbedding = chunkEmbeddings.length > 0 ? chunkEmbeddings[0] : [];
+    
+    return {
+      embedding: finalEmbedding,
+      chunk_embeddings: chunkEmbeddings
+    };
   };
 
   // Function to embed all documents
@@ -191,9 +277,9 @@ export function Dashboard() {
 
         try {
           // Generate embedding for this document
-          const embedding = await embedDocument(document);
+          const { embedding, chunk_embeddings } = await embedDocument(document);
           
-          // Store the embedding in the database
+          // Store the main embedding in the database
           const embeddingResponse = await fetch('http://localhost:8001/documents/embedding', {
             method: 'POST',
             headers: {
@@ -205,7 +291,19 @@ export function Dashboard() {
             })
           });
           
-          if (embeddingResponse.ok) {
+          // Store the chunk embeddings in the database
+          const chunkEmbeddingResponse = await fetch('http://localhost:8001/documents/chunk-embeddings', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              document_id: document.document_id,
+              chunk_embeddings: chunk_embeddings
+            })
+          });
+          
+          if (embeddingResponse.ok && chunkEmbeddingResponse.ok) {
             successCount++;
           } else {
             errorCount++;
@@ -345,6 +443,35 @@ export function Dashboard() {
     }
   };
 
+  const clearDocumentEmbeddings = async () => {
+    try {
+      console.log('Clearing document embeddings...');
+      const response = await fetch('http://localhost:8001/documents/clear-embeddings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      console.log('Clear embeddings response status:', response.status);
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log(`Cleared ${result.cleared_embeddings_count} document embeddings`);
+        console.log('Clear embeddings result:', result);
+        
+        // Reload data to reflect cleared embeddings
+        await loadData();
+        console.log('Data reloaded after clearing embeddings');
+      } else {
+        const errorText = await response.text();
+        console.error('Failed to clear embeddings:', response.status, errorText);
+      }
+    } catch (err) {
+      console.error('Error clearing document embeddings:', err);
+    }
+  };
+
   const findMatches = async () => {
     if (!persona || !persona.embedding || documents.length === 0) {
       setError('Missing persona embedding or documents. Please ensure persona has been embedded and documents are loaded.');
@@ -358,9 +485,10 @@ export function Dashboard() {
     try {
       const personaEmbedding = persona.embedding;
 
-      // Filter documents that have embeddings
+      // Filter documents that have embeddings (either main embedding or chunk embeddings)
       const documentsWithEmbeddings = documents.filter(doc => 
-        doc.embedding && doc.embedding.length > 0
+        (doc.embedding && doc.embedding.length > 0) || 
+        (doc.chunk_embeddings && doc.chunk_embeddings.length > 0)
       );
       
       if (documentsWithEmbeddings.length === 0) {
@@ -373,25 +501,43 @@ export function Dashboard() {
       const allSimilarities: {doc: DocumentData, similarity: number}[] = [];
 
       for (const doc of documentsWithEmbeddings) {
-        // Type guard to ensure embedding exists
-        if (!doc.embedding || doc.embedding.length === 0) {
-          continue;
-        }
-
-        // Check dimension compatibility
-        if (doc.embedding.length !== personaEmbedding.length) {
-          continue;
-        }
-
-        // Calculate cosine similarity
-        const similarity = calculateCosineSimilarity(personaEmbedding, doc.embedding);
-        allSimilarities.push({doc, similarity});
+        let bestSimilarity = 0;
+        let bestEmbedding: number[] | null = null;
         
-        if (similarity >= semanticThresholdValue) {
+        // Try main embedding first
+        if (doc.embedding && doc.embedding.length > 0 && doc.embedding.length === personaEmbedding.length) {
+          const similarity = calculateCosineSimilarity(personaEmbedding, doc.embedding);
+          if (similarity > bestSimilarity) {
+            bestSimilarity = similarity;
+            bestEmbedding = doc.embedding;
+          }
+        }
+        
+        // Try chunk embeddings if available
+        if (doc.chunk_embeddings && doc.chunk_embeddings.length > 0) {
+          for (const chunkEmbedding of doc.chunk_embeddings) {
+            if (chunkEmbedding.length === personaEmbedding.length) {
+              const similarity = calculateCosineSimilarity(personaEmbedding, chunkEmbedding);
+              if (similarity > bestSimilarity) {
+                bestSimilarity = similarity;
+                bestEmbedding = chunkEmbedding;
+              }
+            }
+          }
+        }
+        
+        // Skip if no compatible embeddings found
+        if (bestEmbedding === null) {
+          continue;
+        }
+        
+        allSimilarities.push({doc, similarity: bestSimilarity});
+        
+        if (bestSimilarity >= semanticThresholdValue) {
           semanticMatches.push({
             document: doc,
-            similarityScore: similarity,
-            relevanceReason: generateRelevanceReason(persona, doc, similarity)
+            similarityScore: bestSimilarity,
+            relevanceReason: generateRelevanceReason(persona, doc, bestSimilarity)
           });
         }
       }
@@ -704,7 +850,7 @@ END_THOUGHT_PROCESS:`;
                 background: documents.length > 0 ? '#4CAF50' : '#FF6B6B' 
               }} />
               <span style={{ fontSize: '14px', color: '#B8B8B8' }}>
-                Documents: {documents.length} total, {documents.filter(d => d.embedding && d.embedding.length > 0).length} with embeddings
+                Documents: {documents.length} total, {documents.filter(d => (d.embedding && d.embedding.length > 0) || (d.chunk_embeddings && d.chunk_embeddings.length > 0)).length} with embeddings
               </span>
             </div>
             
@@ -764,6 +910,23 @@ END_THOUGHT_PROCESS:`;
                 }}
               >
               {isEmbeddingDocuments ? `Embedding... (${documentEmbeddingProgress.current}/${documentEmbeddingProgress.total})` : `Embed Documents (${documents.length})`}
+              </button>
+              
+              <button
+                onClick={clearDocumentEmbeddings}
+                disabled={isEmbeddingDocuments}
+                style={{
+                  background: isEmbeddingDocuments ? '#444' : '#6B2C2C',
+                  color: '#FAFAFA',
+                  border: '1px solid #555',
+                  borderRadius: 6,
+                  padding: '8px 16px',
+                  fontSize: '14px',
+                  cursor: isEmbeddingDocuments ? 'not-allowed' : 'pointer',
+                  opacity: isEmbeddingDocuments ? 0.5 : 1
+                }}
+              >
+                Clear Embeddings
               </button>
             
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
