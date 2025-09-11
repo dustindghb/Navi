@@ -1444,7 +1444,7 @@ export function Settings() {
     
     try {
       const result = await testRegulationsApiConnection(regulationsApiKey);
-      setRegulationsApiTestResult(`✅ ${result}`);
+      setRegulationsApiTestResult(result);
     } catch (err) {
       console.error('Regulations.gov API test error:', err);
       setRegulationsApiError(err instanceof Error ? err.message : 'Unknown error');
@@ -1797,7 +1797,7 @@ export function Settings() {
         {/* Remote Configuration Panel */}
         <Paper sx={{ p: 3, mb: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-            <CloudIcon sx={{ color: 'primary.main' }} />
+            <CloudIcon sx={{ color: '#B8B8B8' }} />
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
               Remote Configuration
             </Typography>
@@ -1817,7 +1817,7 @@ export function Settings() {
 
           {/* Remote Ollama Configuration */}
           <Box sx={{ mb: 3 }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, color: 'primary.main' }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, color: '#B8B8B8' }}>
               Remote Ollama Configuration
             </Typography>
             
@@ -1923,7 +1923,7 @@ export function Settings() {
 
           {/* Remote Embedding Configuration */}
           <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, color: 'primary.main' }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, color: '#B8B8B8' }}>
               Remote Embedding Configuration
             </Typography>
             
@@ -2447,19 +2447,18 @@ export function Settings() {
             </Alert>
           )}
 
-          <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <Box sx={{ flex: 1, minWidth: 300 }}>
-              <TextField
-                fullWidth
-                label="Regulations.gov API Key"
-                value={regulationsApiKey}
-                onChange={(e) => setRegulationsApiKey(e.target.value)}
-                placeholder="Enter your regulations.gov API key"
-                variant="outlined"
-                type="password"
-                helperText="Your API key will be saved locally and used to fetch public comments"
-              />
-            </Box>
+          <Box sx={{ mb: 2 }}>
+            <TextField
+              fullWidth
+              label="Regulations.gov API Key"
+              value={regulationsApiKey}
+              onChange={(e) => setRegulationsApiKey(e.target.value)}
+              placeholder="Enter your regulations.gov API key"
+              variant="outlined"
+              type="password"
+              helperText="Your API key will be saved locally and used to fetch public comments"
+              sx={{ mb: 2 }}
+            />
             <Button
               variant="contained"
               color="primary"

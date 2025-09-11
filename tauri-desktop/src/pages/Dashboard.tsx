@@ -1052,9 +1052,11 @@ WRITING STYLE INSTRUCTIONS:
 IMPORTANT FORMATTING INSTRUCTIONS:
 - Use plain text format only
 - Do NOT use ASCII tables, boxes, or complex formatting
-- Use simple bullet points, numbered lists, or paragraph breaks for structure
+- Write everything in paragraph form - NO bullet points, numbered lists, or structured lists
+- Use paragraph breaks to separate different sections and topics
 - Keep formatting clean and readable in a plain text environment
 - Avoid special characters that may not display properly
+- Present all information as flowing, readable paragraphs
 
 Provide your analysis in a clear, well-structured format that covers all these aspects.`;
 
