@@ -29,7 +29,7 @@ export interface PersonaData {
 export interface DocumentWithEmbedding {
   documentId: string;
   title: string;
-  content?: string;
+  text?: string;  // Changed from content to text
   agencyId?: string;
   documentType?: string;
   embedding: number[];
@@ -109,12 +109,7 @@ export const preparePersonaForEmbedding = (persona: PersonaData): string => {
   // Create a comprehensive persona description for embedding
   const personaDescription = parts.join('\n');
   
-  // Add a summary for better semantic matching
-  const summary = `This persona represents a ${persona.role || 'person'} in the ${persona.industry || 'various'} industry, ` +
-    `located in ${persona.location || 'various locations'}, with interests in ${policyInterests.join(', ') || 'various policy areas'}, ` +
-    `preferring to engage with ${preferredAgencies.join(', ') || 'various agencies'} at the ${impactLevel.join(', ') || 'various'} level.`;
-  
-  return `${personaDescription}\n\nSummary: ${summary}`;
+  return personaDescription;
 };
 
 /**
@@ -317,7 +312,7 @@ const generateRelevanceReason = (persona: PersonaData, doc: DocumentWithEmbeddin
   
   // Check for policy interest match
   const policyInterests = persona.policyInterests || persona.policy_interests || [];
-  const docText = `${doc.title} ${doc.content || ''}`.toLowerCase();
+  const docText = `${doc.title} ${doc.text || ''}`.toLowerCase();
   const matchingInterests = policyInterests.filter(interest => 
     docText.includes(interest.toLowerCase())
   );

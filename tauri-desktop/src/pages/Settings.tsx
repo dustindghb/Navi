@@ -333,350 +333,164 @@ export function Settings() {
     try {
       console.log('=== FETCH API DATA FUNCTION CALLED ===');
       console.log('fetchAll parameter:', fetchAll);
-      console.log('Current state - isFetchingApi:', isFetchingApi);
-      console.log('Current state - baseUrl will be set in function');
       console.log('Function execution started at:', new Date().toISOString());
-      console.log('Function is executing...');
       
       setIsFetchingApi(true);
-    setApiError(null);
-    setHasAutoFetched(false); // Reset auto-fetch flag for manual fetches
-    setFetchProgress({
-      isFetching: true,
-      currentBatch: 0,
-      totalBatches: 0,
-      documentsFetched: 0
-    });
-
-    console.log('=== API FETCH START ===');
-    console.log('Fetch mode:', fetchAll ? 'Fetch All (with pagination)' : 'Fetch Sample (50 documents)');
-    console.log('State updated - isFetchingApi set to true');
-
-    try {
-      const baseUrl = 'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/';
-      const limit = fetchAll ? 100 : 50; // Use larger batches for full fetch
-      let allDocuments: any[] = [];
-      let offset = 0;
-      let totalDocuments = 0;
-      let batchCount = 0;
-
-      // First, get total count
-      console.log('Getting total document count...');
-      const countUrl = `${baseUrl}?limit=1&offset=0`;
-      console.log('Count URL constructed:', countUrl);
-      
-        // Try Tauri HTTP client first (bypasses CORS), then fallback to browser fetch
-        console.log('About to make fetch request to:', countUrl);
-        let countResponse;
-        try {
-          // Try Tauri HTTP client first (bypasses CORS)
-          console.log('Trying Tauri HTTP client for count...');
-          countResponse = await tauriFetch(countUrl, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            }
-          });
-          console.log('Tauri HTTP client succeeded for count');
-        } catch (tauriError) {
-          console.log(`Tauri HTTP client failed for count, trying browser fetch... ${tauriError}`);
-          // Fallback to browser fetch
-          countResponse = await fetch(countUrl, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            },
-            mode: 'cors',
-            cache: 'no-cache'
-          });
-          console.log('Browser fetch completed for count');
-        }
-        
-        console.log('Count fetch via browser completed');
-        console.log('Count response status:', countResponse.status);
-        console.log('Count response ok:', countResponse.ok);
-        console.log('Count response statusText:', countResponse.statusText);
-        console.log('Count response headers:', Object.fromEntries(countResponse.headers.entries()));
-
-      if (!countResponse.ok) {
-        console.error('Count response not OK, attempting to read error text...');
-        const errorText = await countResponse.text();
-        console.error('Count API Error Response:', errorText);
-        console.error('Count API Error Details:', {
-          status: countResponse.status,
-          statusText: countResponse.statusText,
-          url: countUrl,
-          errorText: errorText
-        });
-        throw new Error(`Count HTTP ${countResponse.status}: ${countResponse.statusText} - ${errorText}`);
-      }
-
-      console.log('Count response is OK, attempting to parse JSON...');
-      const countData = await countResponse.json();
-      console.log('Count data received:', {
-        success: countData.success,
-        total: countData.data?.pagination?.total || 0,
-        fullResponse: countData
-      });
-      
-      totalDocuments = countData.data?.pagination?.total || 0;
-      console.log('Total documents available:', totalDocuments);
-
-      if (totalDocuments === 0) {
-        throw new Error('No documents found in the API');
-      }
-
-      // Calculate total batches needed
-      const totalBatches = fetchAll ? Math.ceil(totalDocuments / limit) : 1;
-      setFetchProgress(prev => ({
-        ...prev,
-        totalBatches,
+      setApiError(null);
+      setHasAutoFetched(false);
+      setFetchProgress({
+        isFetching: true,
+        currentBatch: 0,
+        totalBatches: 0,
         documentsFetched: 0
-      }));
-
-      // Fetch documents in batches
-      console.log('Starting batch fetching loop...');
-      console.log('Loop conditions:', {
-        offset,
-        totalDocuments,
-        fetchAll,
-        batchCount,
-        shouldContinue: offset < totalDocuments && (fetchAll || batchCount === 0)
       });
+
+      console.log('=== API FETCH START ===');
+      console.log('Fetch mode:', fetchAll ? 'Fetch All Documents' : 'Fetch Sample (50 documents)');
+
+      const baseUrl = 'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/';
+      const limit = fetchAll ? 1000 : 50; // Use Lambda's max limit for full fetch
+      const offset = 0;
+
+      console.log(`Making single API call: ${baseUrl}?limit=${limit}&offset=${offset}`);
       
-      while (offset < totalDocuments && (fetchAll || batchCount === 0)) {
-        batchCount++;
-        console.log(`=== BATCH ${batchCount} START ===`);
-        console.log(`Fetching batch ${batchCount}/${totalBatches} (offset: ${offset}, limit: ${limit})`);
-        console.log(`Batch URL will be: ${baseUrl}?limit=${limit}&offset=${offset}`);
-        
-        setFetchProgress(prev => ({
-          ...prev,
-          currentBatch: batchCount
-        }));
-
-        const batchUrl = `${baseUrl}?limit=${limit}&offset=${offset}`;
-        console.log(`Batch URL constructed: ${batchUrl}`);
-        
-        // Use browser fetch only
-        console.log(`Using browser fetch for batch ${batchCount}...`);
-        console.log(`About to make fetch request to:`, batchUrl);
-        let batchResponse;
-        try {
-          // Try Tauri HTTP client first (bypasses CORS)
-          console.log(`Trying Tauri HTTP client for batch ${batchCount}...`);
-          batchResponse = await tauriFetch(batchUrl, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            }
-          });
-          console.log(`Tauri HTTP client succeeded for batch ${batchCount}`);
-        } catch (tauriError) {
-          console.log(`Tauri HTTP client failed for batch ${batchCount}, trying browser fetch... ${tauriError}`);
-          // Fallback to browser fetch
-          batchResponse = await fetch(batchUrl, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            },
-            mode: 'cors',
-            cache: 'no-cache'
-          });
-          console.log(`Browser fetch completed for batch ${batchCount}`);
-        }
-        
-        console.log(`Batch ${batchCount} fetch via browser completed`);
-        console.log(`Batch ${batchCount} response status:`, batchResponse.status);
-        console.log(`Batch ${batchCount} response ok:`, batchResponse.ok);
-        console.log(`Batch ${batchCount} response statusText:`, batchResponse.statusText);
-        console.log(`Batch ${batchCount} response headers:`, Object.fromEntries(batchResponse.headers.entries()));
-
-        if (!batchResponse.ok) {
-          console.error(`Batch ${batchCount} response not OK, attempting to read error text...`);
-          const errorText = await batchResponse.text();
-          console.error(`Batch ${batchCount} API Error Response:`, errorText);
-          console.error(`Batch ${batchCount} API Error Details:`, {
-            status: batchResponse.status,
-            statusText: batchResponse.statusText,
-            url: batchUrl,
-            errorText: errorText
-          });
-          throw new Error(`Batch ${batchCount} HTTP ${batchResponse.status}: ${batchResponse.statusText} - ${errorText}`);
-        }
-
-        console.log(`Batch ${batchCount} response is OK, attempting to parse JSON...`);
-        const batchData = await batchResponse.json();
-        console.log(`Batch ${batchCount} received:`, {
-          success: batchData.success,
-          documentCount: batchData.data?.documents?.length || 0,
-          pagination: batchData.data?.pagination,
-          fullResponse: batchData
+      let response;
+      try {
+        // Try Tauri HTTP client first (bypasses CORS)
+        console.log('Trying Tauri HTTP client...');
+        response = await tauriFetch(`${baseUrl}?limit=${limit}&offset=${offset}`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          }
         });
-
-        if (batchData.success && batchData.data?.documents) {
-          console.log(`Batch ${batchCount} processing ${batchData.data.documents.length} documents...`);
-          
-          // Process documents to add missing fields
-          const processedDocuments = batchData.data.documents.map((doc: any, index: number) => {
-            console.log(`Processing document ${index + 1} in batch ${batchCount}:`, {
-              documentId: doc.documentId,
-              hasCommentEndDate: !!doc.commentEndDate,
-              commentEndDate: doc.commentEndDate
-            });
-            
-            // Calculate withinCommentPeriod based on commentEndDate
-            let withinCommentPeriod = undefined;
-            if (doc.commentEndDate) {
-              const endDate = new Date(doc.commentEndDate);
-              const now = new Date();
-              withinCommentPeriod = now <= endDate;
-              console.log(`Document ${index + 1} withinCommentPeriod calculation:`, {
-                endDate: endDate.toISOString(),
-                now: now.toISOString(),
-                withinCommentPeriod
-              });
-            }
-            
-            return {
-              ...doc,
-              withinCommentPeriod
-            };
-          });
-          
-          console.log(`Batch ${batchCount} processed ${processedDocuments.length} documents`);
-          allDocuments = [...allDocuments, ...processedDocuments];
-          console.log(`Total documents collected so far: ${allDocuments.length}`);
-          
-          setFetchProgress(prev => ({
-            ...prev,
-            documentsFetched: allDocuments.length
-          }));
-        } else {
-          console.warn(`Batch ${batchCount} had no documents or was not successful:`, {
-            success: batchData.success,
-            hasDocuments: !!batchData.data?.documents,
-            documentCount: batchData.data?.documents?.length || 0
-          });
-        }
-
-        // Update pagination config
-        if (batchData.data?.pagination) {
-          setPaginationConfig({
-            limit: batchData.data.pagination.limit,
-            offset: batchData.data.pagination.offset,
-            total: batchData.data.pagination.total,
-            hasMore: batchData.data.pagination.has_more
-          });
-        }
-
-        offset += limit;
-        console.log(`Batch ${batchCount} completed. Updated offset to: ${offset}`);
-
-        // If not fetching all, break after first batch
-        if (!fetchAll) {
-          console.log(`Not fetching all, breaking after first batch (batch ${batchCount})`);
-          break;
-        }
-
-        // Add small delay between batches to be respectful to the API
-        if (offset < totalDocuments) {
-          console.log(`Adding 100ms delay before next batch (offset: ${offset}, total: ${totalDocuments})`);
-          await new Promise(resolve => setTimeout(resolve, 100));
-        } else {
-          console.log(`No more batches needed (offset: ${offset}, total: ${totalDocuments})`);
-        }
-        
-        console.log(`=== BATCH ${batchCount} END ===`);
+        console.log('Tauri HTTP client succeeded');
+      } catch (tauriError) {
+        console.log(`Tauri HTTP client failed, trying browser fetch... ${tauriError}`);
+        // Fallback to browser fetch
+        response = await fetch(`${baseUrl}?limit=${limit}&offset=${offset}`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          mode: 'cors',
+          cache: 'no-cache'
+        });
+        console.log('Browser fetch completed');
       }
 
-      console.log('=== ALL DATA RECEIVED ===');
-      console.log('Total documents fetched:', allDocuments.length);
-      console.log('Sample document structure:', allDocuments[0] ? {
-        documentId: allDocuments[0].documentId,
-        title: allDocuments[0].title,
-        hasEmbedding: !!allDocuments[0].embedding,
-        embeddingLength: allDocuments[0].embedding?.length || 0,
-        hasContent: !!allDocuments[0].content,
-        contentLength: allDocuments[0].content?.length || 0,
-        hasPostedDate: !!allDocuments[0].postedDate,
-        hasCommentEndDate: !!allDocuments[0].commentEndDate,
-        withinCommentPeriod: allDocuments[0].withinCommentPeriod,
-        allKeys: Object.keys(allDocuments[0])
-      } : 'No documents');
+      console.log('API response received:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok
+      });
 
-      // Format the data for storage
-      console.log('Formatting data for storage...');
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API Error Response:', errorText);
+        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log('API data received:', {
+        success: data.success,
+        documentCount: data.data?.documents?.length || 0,
+        pagination: data.data?.pagination,
+        total: data.data?.pagination?.total || 0
+      });
+
+      if (!data.success || !data.data?.documents) {
+        throw new Error('API returned unsuccessful response or no documents');
+      }
+
+      // Process documents to add missing fields and optimize for localStorage
+      console.log(`Processing ${data.data.documents.length} documents...`);
+      const processedDocuments = data.data.documents.map((doc: any) => {
+        // Calculate withinCommentPeriod based on commentEndDate
+        let withinCommentPeriod = undefined;
+        if (doc.commentEndDate) {
+          const endDate = new Date(doc.commentEndDate);
+          const now = new Date();
+          withinCommentPeriod = now <= endDate;
+        }
+        
+        // Remove embedding attribute since we're embedding locally
+        const { embedding, ...docWithoutEmbedding } = doc;
+        
+        return {
+          ...docWithoutEmbedding,
+          withinCommentPeriod
+        };
+      });
+
+      console.log(`Processed ${processedDocuments.length} documents (keeping full text content)`);
+
+      // Upload directly to database
+      console.log('Uploading documents directly to database...');
+      const uploadResponse = await fetch('http://localhost:8001/api/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ documents: processedDocuments })
+      });
+
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        throw new Error(`Database upload failed: HTTP ${uploadResponse.status} - ${errorText}`);
+      }
+
+      const uploadResult = await uploadResponse.json();
+      console.log('Database upload successful:', uploadResult);
+
+      // Format the data for display (without localStorage)
       const formattedData = {
-        documents: allDocuments,
+        documents: processedDocuments,
         pagination: {
-          total: totalDocuments,
-          fetched: allDocuments.length,
-          batches: batchCount,
+          total: data.data.pagination.total,
+          fetched: processedDocuments.length,
           limit: limit,
+          offset: offset,
           fetchMode: fetchAll ? 'all' : 'sample'
         },
-        _saved_at: new Date().toISOString()
+        _saved_at: new Date().toISOString(),
+        uploadResult: uploadResult
       };
       
-      console.log('Formatted data structure:', {
-        documentCount: formattedData.documents.length,
-        pagination: formattedData.pagination,
-        savedAt: formattedData._saved_at
+      console.log('Data uploaded to database:', {
+        documentCount: processedDocuments.length,
+        total: data.data.pagination.total,
+        fetchMode: fetchAll ? 'all' : 'sample',
+        uploadResult: uploadResult
       });
-
-      // Save the data to localStorage
-      console.log('Saving data to localStorage...');
-      try {
-        localStorage.setItem('navi-regulations-data', JSON.stringify(formattedData));
-        localStorage.setItem('navi-last-fetch', formattedData._saved_at);
-        console.log('Data successfully saved to localStorage');
-      } catch (storageError) {
-        console.error('Error saving to localStorage:', storageError);
-        throw new Error(`Failed to save data to localStorage: ${storageError}`);
-      }
       
-      console.log('Updating component state...');
+      // Update component state (no localStorage needed)
       setSavedData(formattedData);
       setApiData(formattedData);
       setLastFetchTime(new Date().toISOString());
-      console.log('Component state updated successfully');
-      
-      console.log('Data saved to localStorage:', {
-        totalDocuments: allDocuments.length,
-        timestamp: formattedData._saved_at,
-        fetchMode: fetchAll ? 'all' : 'sample'
+      setUploadResult(uploadResult);
+      setPaginationConfig({
+        limit: data.data.pagination.limit,
+        offset: data.data.pagination.offset,
+        total: data.data.pagination.total,
+        hasMore: data.data.pagination.has_more
       });
       
       // Dispatch custom event to notify other components
-      console.log('Dispatching storage change event...');
       window.dispatchEvent(new CustomEvent('storageChange', {
         detail: { key: 'navi-regulations-data', value: formattedData }
       }));
-      console.log('Storage change event dispatched');
       
       console.log('=== FETCH API DATA COMPLETED SUCCESSFULLY ===');
       
     } catch (err: any) {
       console.error('=== API FETCH ERROR ===');
       console.error('Error occurred at:', new Date().toISOString());
-      console.error('Error type:', typeof err);
-      console.error('Error constructor:', err?.constructor?.name);
       console.error('Error message:', err instanceof Error ? err.message : String(err));
-      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack trace');
       console.error('Full error object:', err);
       
-      // Log current state at time of error
-      console.error('State at time of error:', {
-        isFetchingApi,
-        fetchAll
-      });
-      
-      // More detailed error message
       let errorMessage = 'Failed to fetch data from API';
       if (err instanceof Error) {
         if (err.message.includes('fetch')) {
@@ -692,10 +506,8 @@ export function Settings() {
         }
       }
       
-      console.error('Setting error message:', errorMessage);
       setApiError(errorMessage);
     } finally {
-      console.log('=== FINALLY BLOCK EXECUTING ===');
       console.log('Resetting fetch state...');
       setIsFetchingApi(false);
       setFetchProgress({
@@ -704,16 +516,7 @@ export function Settings() {
         totalBatches: 0,
         documentsFetched: 0
       });
-      console.log('Fetch state reset completed');
       console.log('=== API FETCH END ===');
-    }
-    } catch (outerError: any) {
-      console.error('=== OUTER FUNCTION ERROR ===');
-      console.error('Outer error type:', typeof outerError);
-      console.error('Outer error message:', outerError instanceof Error ? outerError.message : String(outerError));
-      console.error('Outer error stack:', outerError instanceof Error ? outerError.stack : 'No stack trace');
-      console.error('Full outer error object:', outerError);
-      setApiError(`Function execution error: ${outerError instanceof Error ? outerError.message : String(outerError)}`);
     }
   };
 
@@ -771,7 +574,7 @@ export function Settings() {
       
       // Automatically fetch fresh API data after clearing
       console.log('Auto-fetching fresh API data after clearing...');
-      await fetchApiData();
+      await fetchApiData(true);
       
     } catch (err) {
       console.error('Error clearing data:', err);
@@ -780,60 +583,6 @@ export function Settings() {
     }
   };
 
-  const uploadToDatabase = async () => {
-    if (!savedData || !savedData.documents) {
-      setApiError('No saved data to upload to database');
-      return;
-    }
-
-    setIsUploadingToDatabase(true);
-    setUploadResult(null);
-    setApiError(null);
-
-    try {
-      console.log('=== UPLOADING SAVED DATA TO DATABASE ===');
-      console.log('Saved data structure:', {
-        hasDocuments: !!savedData.documents,
-        documentsLength: savedData.documents?.length || 0,
-        hasPagination: !!savedData.pagination,
-        hasSavedAt: !!savedData._saved_at,
-        firstDocumentKeys: savedData.documents?.[0] ? Object.keys(savedData.documents[0]) : 'No documents'
-      });
-      console.log('Documents to upload:', savedData.documents.length);
-
-      // Make direct HTTP call to the upload endpoint using browser fetch only
-      console.log('Using browser fetch for database upload...');
-      const response = await fetch('http://localhost:8001/api/upload', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(savedData)
-      });
-      console.log('Browser fetch completed for database upload');
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('HTTP error response:', errorText);
-        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
-      }
-
-      const result = await response.json();
-      console.log('Database upload result:', result);
-      setUploadResult(result);
-
-    } catch (err: any) {
-      console.error('Error uploading to database:', err);
-      console.error('Error details:', {
-        name: err?.name,
-        message: err?.message,
-        stack: err?.stack
-      });
-      setApiError(`Failed to upload to database: ${err?.message || err}`);
-    } finally {
-      setIsUploadingToDatabase(false);
-    }
-  };
 
   const testDatabaseConnectivity = async () => {
     try {
@@ -877,7 +626,7 @@ export function Settings() {
           {
             documentId: "TEST-SAMPLE-001",
             title: "Sample Test Document",
-            content: "This is a sample document for testing upload functionality",
+            text: "This is a sample document for testing upload functionality",
             agencyId: "TEST",
             documentType: "Test",
             webDocumentLink: "https://test.com/doc",
@@ -1143,20 +892,6 @@ export function Settings() {
     }
   };
 
-  const getDataSummary = (data: any) => {
-    if (!data) return 'No data';
-    
-    if (Array.isArray(data)) {
-      return `Array with ${data.length} items`;
-    }
-    
-    if (typeof data === 'object') {
-      const keys = Object.keys(data);
-      return `Object with ${keys.length} properties: ${keys.slice(0, 3).join(', ')}${keys.length > 3 ? '...' : ''}`;
-    }
-    
-    return `${typeof data} data`;
-  };
 
   // Local Ollama Functions
   const detectLocalOllama = async () => {
@@ -1600,86 +1335,6 @@ export function Settings() {
     }
   };
 
-  const splitApiData = (data: any) => {
-    console.log('=== SPLIT API DATA START ===');
-    console.log('Input data structure:', {
-      hasData: !!data,
-      hasDocuments: !!(data && data.documents),
-      documentsIsArray: !!(data && data.documents && Array.isArray(data.documents)),
-      documentsLength: data?.documents?.length || 0,
-      firstDocumentKeys: data?.documents?.[0] ? Object.keys(data.documents[0]) : 'No documents',
-      pagination: data?.pagination
-    });
-
-    if (!data || !data.documents || !Array.isArray(data.documents)) {
-      console.log('Invalid data structure, returning null');
-      return { embeddings: null, summaries: null };
-    }
-
-    const embeddings: any[] = [];
-    const summaries: any[] = [];
-
-    data.documents.forEach((document: any, index: number) => {
-      console.log(`Processing document ${index}:`, {
-        documentId: document.documentId,
-        title: document.title,
-        hasEmbedding: !!document.embedding,
-        embeddingLength: document.embedding ? document.embedding.length : 0,
-        hasContent: !!document.content,
-        contentLength: document.content ? document.content.length : 0,
-        allKeys: Object.keys(document)
-      });
-      
-      if (document) {
-        // Create embedding object with embedding, documentId, title, and links
-        const embeddingObj = {
-          documentId: document.documentId,
-          title: document.title,
-          embedding: document.embedding || null,
-          webCommentLink: document.webCommentLink || null,
-          webDocumentLink: document.webDocumentLink || null,
-          webDocketLink: document.webDocketLink || null,
-          s3Key: document.s3Key || null,
-          metadata: document.metadata || null
-        };
-        embeddings.push(embeddingObj);
-
-        // Create summary object with all attributes except embedding
-        const { embedding, ...summaryData } = document;
-        summaries.push(summaryData);
-      }
-    });
-
-    // Log summary of extracted data
-    console.log('Split data summary:', {
-      totalDocuments: data.documents.length,
-      embeddingsCount: embeddings.length,
-      summariesCount: summaries.length,
-      pagination: data.pagination,
-      firstEmbeddingLinks: embeddings[0] ? {
-        webCommentLink: embeddings[0].webCommentLink,
-        webDocumentLink: embeddings[0].webDocumentLink,
-        webDocketLink: embeddings[0].webDocketLink
-      } : 'No embeddings'
-    });
-
-    const result = {
-      embeddings: {
-        count: embeddings.length,
-        items: embeddings,
-        _saved_at: data._saved_at
-      },
-      summaries: {
-        count: summaries.length,
-        items: summaries,
-        _saved_at: data._saved_at
-      },
-      pagination: data.pagination
-    };
-
-    console.log('=== SPLIT API DATA END ===');
-    return result;
-  };
 
   // Helper Components for Local Ollama
   const StatusItem = ({ label, value, extra = '', type = 'ok' }: { 
@@ -2077,7 +1732,6 @@ export function Settings() {
                     console.log('Successfully generated and stored remote persona embedding:', {
                       dimensions: embedding.length,
                       model: remoteEmbeddingModel,
-                      personaSummary: preparePersonaForEmbedding(persona).substring(0, 200) + '...',
                       storedInDatabase: !!persona.id
                     });
                     
@@ -2101,9 +1755,6 @@ export function Settings() {
                 </Typography>
                 <Typography variant="body2" sx={{ mb: 1 }}>
                   <strong>Model:</strong> {remoteEmbeddingTestResult?.model}
-                </Typography>
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  <strong>Dimensions:</strong> {remoteEmbeddingTestResult?.dimensions}
                 </Typography>
                 {remoteEmbeddingTestResult?.type === 'persona' && (
                   <>
@@ -2133,11 +1784,6 @@ export function Settings() {
                     </Box>
                   </>
                 )}
-                <Typography variant="body2" sx={{ mb: 1, mt: 1 }}>
-                  <strong>Embedding Preview:</strong> {Array.isArray(remoteEmbeddingTestResult?.embedding) 
-                    ? `[${remoteEmbeddingTestResult.embedding.slice(0, 5).join(', ')}...]` 
-                    : remoteEmbeddingTestResult?.embedding}
-                </Typography>
               </Alert>
             </Collapse>
           </Box>
@@ -2394,7 +2040,6 @@ export function Settings() {
                     console.log('Successfully generated and stored local persona embedding:', {
                       dimensions: embedding.length,
                       model: embeddingModel,
-                      personaSummary: preparePersonaForEmbedding(persona).substring(0, 200) + '...',
                       storedInDatabase: !!persona.id
                     });
                     
@@ -2418,9 +2063,6 @@ export function Settings() {
                 </Typography>
                 <Typography variant="body2" sx={{ mb: 1 }}>
                   <strong>Model:</strong> {embeddingTestResult?.model}
-                </Typography>
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  <strong>Dimensions:</strong> {embeddingTestResult?.dimensions}
                 </Typography>
                 {embeddingTestResult?.type === 'persona' && (
                   <>
@@ -2450,11 +2092,6 @@ export function Settings() {
                     </Box>
                   </>
                 )}
-                <Typography variant="body2" sx={{ mb: 1, mt: 1 }}>
-                  <strong>Embedding Preview:</strong> {Array.isArray(embeddingTestResult?.embedding) 
-                    ? `[${embeddingTestResult.embedding.slice(0, 5).join(', ')}...]` 
-                    : embeddingTestResult?.embedding}
-                </Typography>
               </Alert>
             </Collapse>
           </Box>
@@ -2518,7 +2155,8 @@ export function Settings() {
           </Typography>
           
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Fetch dockets and notices from regulations.gov API (auto-fetches on app startup)
+            Fetch dockets and notices from regulations.gov API and upload directly to database (auto-fetches on app startup)<br/>
+            <em>Note: Full text content is preserved and stored in the database</em>
           </Typography>
 
           <Box sx={{ mb: 2, p: 2, bgcolor: 'background.default', borderRadius: 1, border: '1px solid #333' }}>
@@ -2526,11 +2164,11 @@ export function Settings() {
               API Configuration:
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
-              URL: https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/<br/>
-              Method: GET<br/>
-              Pagination: ?limit=50&offset=0<br/>
+              Source: https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/<br/>
+              Method: GET → POST to database<br/>
+              Flow: Fetch from API → Upload to localhost:8001/api/upload<br/>
               Client: Tauri HTTP (bypasses CORS)<br/>
-              Features: Pagination, Progress Tracking, Error Handling
+              Features: Direct database upload, Full text preservation, Error handling
             </Typography>
           </Box>
 
@@ -2548,16 +2186,15 @@ export function Settings() {
               variant="contained"
               startIcon={<DownloadIcon />}
               onClick={() => {
-                console.log('=== FETCH DOCUMENTS BUTTON CLICKED ===');
+                console.log('=== FETCH & UPLOAD BUTTON CLICKED ===');
                 console.log('Button clicked at:', new Date().toISOString());
                 console.log('isFetchingApi state:', isFetchingApi);
                 console.log('About to call fetchApiData(true)');
-                alert('Button clicked! Check console for logs.');
                 fetchApiData(true);
               }}
               disabled={isFetchingApi}
             >
-              {isFetchingApi && fetchProgress.isFetching ? 'Fetching...' : 'Fetch Documents'}
+              {isFetchingApi && fetchProgress.isFetching ? 'Fetching & Uploading...' : 'Fetch & Upload to Database'}
             </Button>
             
             <Button
@@ -2590,17 +2227,6 @@ export function Settings() {
               </Button>
             )}
 
-            {savedData && (
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<DownloadIcon />}
-                onClick={uploadToDatabase}
-                disabled={isUploadingToDatabase}
-              >
-                {isUploadingToDatabase ? 'Uploading...' : 'Upload to Database'}
-              </Button>
-            )}
 
             <Button
               variant="outlined"
@@ -2668,9 +2294,7 @@ export function Settings() {
                 📥 {hasAutoFetched ? 'Auto-fetching Documents...' : 'Fetching Documents...'}
               </Typography>
               <Typography variant="body2">
-                Batch {fetchProgress.currentBatch} of {fetchProgress.totalBatches} • 
-                Documents fetched: {fetchProgress.documentsFetched}
-                {paginationConfig.total > 0 && ` of ${paginationConfig.total}`}
+                Fetching documents from API and uploading to database...
                 {hasAutoFetched && (
                   <span style={{ color: '#666', fontSize: '0.8em' }}>
                     {' '}• Auto-fetch (no saved data found)
@@ -2686,7 +2310,7 @@ export function Settings() {
                 Data saved locally
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                {savedData.documents ? `${savedData.documents.length} documents` : getDataSummary(savedData)} • 
+                {savedData.documents ? `${savedData.documents.length} documents` : 'Data available'} • 
                 {savedData.pagination ? ` ${savedData.pagination.fetchMode} mode` : ''} • 
                 Saved at {savedData._saved_at ? new Date(savedData._saved_at).toLocaleString() : 'Unknown time'}
               </Typography>
@@ -2704,124 +2328,40 @@ export function Settings() {
               </Button>
               
               <Collapse in={showPreviewData}>
-                {(() => {
-                  const splitData = splitApiData(apiData);
-                  return (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {/* Embeddings Data */}
-                      {splitData.embeddings && (
-                        <Paper sx={{ 
-                          bgcolor: 'background.default',
-                          border: '1px solid #444',
-                          overflow: 'hidden'
-                        }}>
-                          <Box sx={{ 
-                            p: 2, 
-                            bgcolor: '#2A4A2A', 
-                            borderBottom: '1px solid #444',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center'
-                          }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#4CAF50' }}>
-                              Embeddings Data ({splitData.embeddings.count} items)
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {new Date().toLocaleTimeString()}
-                            </Typography>
-                          </Box>
-                          <Box sx={{ 
-                            p: 2,
-                            maxHeight: '300px',
-                            overflowY: 'auto',
-                            overflowX: 'auto',
-                            fontSize: '12px',
-                            fontFamily: 'monospace',
-                            whiteSpace: 'pre-wrap',
-                            wordBreak: 'break-word',
-                            minWidth: '0'
-                          }}>
-                            {JSON.stringify(splitData.embeddings, null, 2)}
-                          </Box>
-                        </Paper>
-                      )}
-
-                      {/* Summaries Data */}
-                      {splitData.summaries && (
-                        <Paper sx={{ 
-                          bgcolor: 'background.default',
-                          border: '1px solid #444',
-                          overflow: 'hidden'
-                        }}>
-                          <Box sx={{ 
-                            p: 2, 
-                            bgcolor: '#2A2A4A', 
-                            borderBottom: '1px solid #444',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center'
-                          }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#2196F3' }}>
-                              Summaries Data ({splitData.summaries.count} items)
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {new Date().toLocaleTimeString()}
-                            </Typography>
-                          </Box>
-                          <Box sx={{ 
-                            p: 2,
-                            maxHeight: '300px',
-                            overflowY: 'auto',
-                            overflowX: 'auto',
-                            fontSize: '12px',
-                            fontFamily: 'monospace',
-                            whiteSpace: 'pre-wrap',
-                            wordBreak: 'break-word',
-                            minWidth: '0'
-                          }}>
-                            {JSON.stringify(splitData.summaries, null, 2)}
-                          </Box>
-                        </Paper>
-                      )}
-
-                      {/* Original Data (for reference) */}
-                      <Paper sx={{ 
-                        bgcolor: 'background.default',
-                        border: '1px solid #444',
-                        overflow: 'hidden'
-                      }}>
-                        <Box sx={{ 
-                          p: 2, 
-                          bgcolor: '#333', 
-                          borderBottom: '1px solid #444',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center'
-                        }}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                            Original Data ({getDataSummary(apiData)})
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {new Date().toLocaleTimeString()}
-                          </Typography>
-                        </Box>
-                        <Box sx={{ 
-                          p: 2,
-                          maxHeight: '200px',
-                          overflowY: 'auto',
-                          overflowX: 'auto',
-                          fontSize: '12px',
-                          fontFamily: 'monospace',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                          minWidth: '0'
-                        }}>
-                          {JSON.stringify(apiData, null, 2)}
-                        </Box>
-                      </Paper>
-                    </Box>
-                  );
-                })()}
+                <Paper sx={{ 
+                  bgcolor: 'background.default',
+                  border: '1px solid #444',
+                  overflow: 'hidden'
+                }}>
+                  <Box sx={{ 
+                    p: 2, 
+                    bgcolor: '#333', 
+                    borderBottom: '1px solid #444',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                      Original Data
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {new Date().toLocaleTimeString()}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ 
+                    p: 2,
+                    maxHeight: '400px',
+                    overflowY: 'auto',
+                    overflowX: 'auto',
+                    fontSize: '12px',
+                    fontFamily: 'monospace',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    minWidth: '0'
+                  }}>
+                    {JSON.stringify(apiData, null, 2)}
+                  </Box>
+                </Paper>
               </Collapse>
             </Box>
           )}

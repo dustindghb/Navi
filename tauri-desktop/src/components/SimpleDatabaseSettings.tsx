@@ -59,7 +59,7 @@ interface DocumentData {
   id: number;
   document_id: string;
   title: string;
-  content: string;
+  text: string;  // Changed from content to text
   agency_id: string;
   document_type?: string;
   web_comment_link?: string;

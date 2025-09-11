@@ -22,7 +22,7 @@ interface DocumentData {
   id: number;
   document_id: string;
   title: string;
-  content?: string;
+  text?: string;  // Changed from content to text
   agency_id?: string;
   document_type?: string;
   web_comment_link?: string;
@@ -73,6 +73,10 @@ export function Dashboard() {
   const [isGeneratingReasoning, setIsGeneratingReasoning] = useState(false);
   const [reasoningProgress, setReasoningProgress] = useState({ current: 0, total: 0 });
   const [shouldStopReasoning, setShouldStopReasoning] = useState(false);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  
+  // Semantic matching threshold
+  const [semanticThreshold, setSemanticThreshold] = useState(5.0);
 
   // Load data on component mount
   useEffect(() => {
@@ -123,10 +127,7 @@ export function Dashboard() {
     // Create a comprehensive description
     const personaDescription = parts.join('. ');
     
-    // Add semantic summary for better embedding quality
-    const semanticSummary = `This persona represents a ${persona.role || 'person'} in the ${persona.industry || 'general'} industry who is interested in ${persona.policy_interests?.join(', ') || 'various policy areas'} and prefers to engage with ${persona.preferred_agencies?.join(', ') || 'government agencies'}.`;
-    
-    return `${semanticSummary} ${personaDescription}`;
+    return personaDescription;
   };
 
   // Function to generate persona embedding using remote model
@@ -228,7 +229,7 @@ export function Dashboard() {
 
   // Function to embed a single document
   const embedDocument = async (document: DocumentData): Promise<number[]> => {
-    const documentText = `${document.title}. ${document.content || ''}`.trim();
+    const documentText = `${document.title}. ${document.text || ''}`.trim();
     
     if (!documentText) {
       throw new Error(`No content available for document ${document.document_id}`);
@@ -390,7 +391,7 @@ export function Dashboard() {
     }
   };
 
-  const performSemanticMatching = async (threshold: number = 0.5) => {
+  const performSemanticMatching = async () => {
     if (!persona || !persona.embedding || documents.length === 0) {
       setError('Missing persona embedding or documents. Please ensure persona has been embedded and documents are loaded.');
       return;
@@ -398,7 +399,8 @@ export function Dashboard() {
 
     setIsLoading(true);
     setError(null);
-    addLog(`=== PERFORMING SEMANTIC MATCHING (threshold: ${threshold}) ===`);
+    const threshold = semanticThreshold / 10; // Convert from 0-10 scale to 0-1 scale
+    addLog(`=== PERFORMING SEMANTIC MATCHING (threshold: ${semanticThreshold}/10) ===`);
 
     try {
       const personaEmbedding = persona.embedding;
@@ -454,8 +456,8 @@ export function Dashboard() {
       matches.sort((a, b) => b.similarityScore - a.similarityScore);
       
       setMatchedDocuments(matches);
-      addLog(`Found ${matches.length} relevant documents above threshold ${threshold}`);
-      addLog(`Top matches: ${matches.slice(0, 3).map(m => `${m.document.title} (${m.similarityScore.toFixed(3)})`).join(', ')}`);
+      addLog(`Found ${matches.length} relevant documents above threshold ${semanticThreshold}/10`);
+      addLog(`Top matches: ${matches.slice(0, 3).map(m => `${m.document.title} (${(m.similarityScore * 10).toFixed(1)}/10)`).join(', ')}`);
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -495,7 +497,7 @@ export function Dashboard() {
     }
     
     // Check for policy interest match
-    const docText = `${doc.title} ${doc.content || ''}`.toLowerCase();
+    const docText = `${doc.title} ${doc.text || ''}`.toLowerCase();
     const matchingInterests = persona.policy_interests?.filter(interest => 
       docText.includes(interest.toLowerCase())
     ) || [];
@@ -527,7 +529,7 @@ export function Dashboard() {
   };
 
   // Function to call GPT-OSS:20b for reasoning
-  const getGPTReasoning = async (persona: PersonaData, document: DocumentData): Promise<GPTReasoningResult> => {
+  const getGPTReasoning = async (persona: PersonaData, document: DocumentData, signal?: AbortSignal): Promise<GPTReasoningResult> => {
     // Get GPT configuration from localStorage
     const gptHost = localStorage.getItem('gptHost') || '10.0.4.52';
     const gptPort = localStorage.getItem('gptPort') || '11434';
@@ -539,7 +541,7 @@ export function Dashboard() {
     const personaText = preparePersonaForEmbedding(persona);
     
     // Prepare document text
-    const documentText = `${document.title}\n\n${document.content || ''}`.trim();
+    const documentText = `${document.title}\n\n${document.text || ''}`.trim();
     
     const prompt = `You are an AI assistant analyzing government document relevance. 
 
@@ -572,8 +574,7 @@ END_THOUGHT_PROCESS:`;
       stream: false,
       options: {
         temperature: 0.7,
-        top_p: 0.9,
-        max_tokens: 1000
+        top_p: 0.9
       }
     };
 
@@ -582,7 +583,8 @@ END_THOUGHT_PROCESS:`;
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: signal
     });
 
     if (!response.ok) {
@@ -625,6 +627,11 @@ END_THOUGHT_PROCESS:`;
     setShouldStopReasoning(false);
     setEmbeddingError(null);
     setReasoningProgress({ current: 0, total: matchedDocuments.length });
+    
+    // Create abort controller for cancelling requests
+    const controller = new AbortController();
+    setAbortController(controller);
+    
     addLog('=== GENERATING GPT REASONING ===');
 
     try {
@@ -643,20 +650,27 @@ END_THOUGHT_PROCESS:`;
         addLog(`Analyzing document ${i + 1}/${matchedDocuments.length}: ${match.document.title.substring(0, 50)}...`);
 
         try {
-          const gptResult = await getGPTReasoning(persona, match.document);
+          const gptResult = await getGPTReasoning(persona, match.document, controller.signal);
           updatedMatches[i].gptReasoning = gptResult;
           
           addLog(`✓ GPT analysis complete for ${match.document.document_id}: Score ${gptResult.relevanceScore}/10`);
         } catch (err) {
           const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-          addLog(`✗ Error analyzing ${match.document.document_id}: ${errorMessage}`);
           
-          // Add error result
-          updatedMatches[i].gptReasoning = {
-            relevanceScore: 0,
-            reasoning: `Error: ${errorMessage}`,
-            thoughtProcess: 'Analysis failed'
-          };
+          // Check if this was an abort error
+          if (err instanceof Error && err.name === 'AbortError') {
+            addLog(`⏹️ Analysis cancelled for ${match.document.document_id}`);
+            break; // Exit the loop completely
+          } else {
+            addLog(`✗ Error analyzing ${match.document.document_id}: ${errorMessage}`);
+            
+            // Add error result
+            updatedMatches[i].gptReasoning = {
+              relevanceScore: 0,
+              reasoning: `Error: ${errorMessage}`,
+              thoughtProcess: 'Analysis failed'
+            };
+          }
         }
 
         // Small delay to avoid overwhelming the GPT service
@@ -674,6 +688,7 @@ END_THOUGHT_PROCESS:`;
     } finally {
       setIsGeneratingReasoning(false);
       setReasoningProgress({ current: 0, total: 0 });
+      setAbortController(null);
     }
   };
 
@@ -835,56 +850,45 @@ END_THOUGHT_PROCESS:`;
               {isEmbeddingDocuments ? `Embedding... (${documentEmbeddingProgress.current}/${documentEmbeddingProgress.total})` : `Embed Documents (${documents.length})`}
               </button>
             
-              <button
-              onClick={() => performSemanticMatching(0.5)}
-              disabled={isLoading || !persona?.embedding || documents.length === 0}
-                style={{
-                background: (isLoading || !persona?.embedding || documents.length === 0) ? '#444' : '#2A4A2A',
-                  color: '#FAFAFA',
-                border: '1px solid #555',
-                  borderRadius: 6,
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                cursor: (isLoading || !persona?.embedding || documents.length === 0) ? 'not-allowed' : 'pointer',
-                opacity: (isLoading || !persona?.embedding || documents.length === 0) ? 0.5 : 1
-                }}
-              >
-              {isLoading ? 'Matching...' : 'Semantic Match (5/10)'}
-              </button>
-            
-              <button
-              onClick={() => performSemanticMatching(0.4)}
-              disabled={isLoading || !persona?.embedding || documents.length === 0}
-                style={{
-                background: (isLoading || !persona?.embedding || documents.length === 0) ? '#444' : '#4A2A2A',
-                  color: '#FAFAFA',
-                border: '1px solid #555',
-                  borderRadius: 6,
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                cursor: (isLoading || !persona?.embedding || documents.length === 0) ? 'not-allowed' : 'pointer',
-                opacity: (isLoading || !persona?.embedding || documents.length === 0) ? 0.5 : 1
-                }}
-              >
-              {isLoading ? 'Matching...' : 'Semantic Match (4/10)'}
-              </button>
-            
-              <button
-              onClick={() => performSemanticMatching(0.3)}
-              disabled={isLoading || !persona?.embedding || documents.length === 0}
-                style={{
-                background: (isLoading || !persona?.embedding || documents.length === 0) ? '#444' : '#2A2A4A',
-                  color: '#FAFAFA',
-                border: '1px solid #555',
-                  borderRadius: 6,
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                cursor: (isLoading || !persona?.embedding || documents.length === 0) ? 'not-allowed' : 'pointer',
-                opacity: (isLoading || !persona?.embedding || documents.length === 0) ? 0.5 : 1
-                }}
-              >
-              {isLoading ? 'Matching...' : 'Semantic Match (3/10)'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <label style={{ color: '#B8B8B8', fontSize: '14px', whiteSpace: 'nowrap' }}>
+                  Min Score:
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  step="0.5"
+                  value={semanticThreshold}
+                  onChange={(e) => setSemanticThreshold(parseFloat(e.target.value) || 5.0)}
+                  style={{
+                    width: '60px',
+                    padding: '4px 8px',
+                    background: '#2A2A2A',
+                    color: '#FAFAFA',
+                    border: '1px solid #444',
+                    borderRadius: 4,
+                    fontSize: '14px'
+                  }}
+                />
+                <span style={{ color: '#B8B8B8', fontSize: '14px' }}>/10</span>
+                <button
+                  onClick={performSemanticMatching}
+                  disabled={isLoading || !persona?.embedding || documents.length === 0}
+                  style={{
+                    background: (isLoading || !persona?.embedding || documents.length === 0) ? '#444' : '#2A4A2A',
+                    color: '#FAFAFA',
+                    border: '1px solid #555',
+                    borderRadius: 6,
+                    padding: '8px 16px',
+                    fontSize: '14px',
+                    cursor: (isLoading || !persona?.embedding || documents.length === 0) ? 'not-allowed' : 'pointer',
+                    opacity: (isLoading || !persona?.embedding || documents.length === 0) ? 0.5 : 1
+                  }}
+                >
+                  {isLoading ? 'Matching...' : 'Semantic Match'}
+                </button>
+              </div>
             
               <button
               onClick={generateGPTReasoning}
@@ -905,7 +909,12 @@ END_THOUGHT_PROCESS:`;
             
               {isGeneratingReasoning && (
                 <button
-                  onClick={() => setShouldStopReasoning(true)}
+                  onClick={() => {
+                    if (abortController) {
+                      abortController.abort();
+                      addLog('⏹️ Stopping GPT analysis...');
+                    }
+                  }}
                   style={{
                     background: '#6B2C2C',
                     color: '#FAFAFA',

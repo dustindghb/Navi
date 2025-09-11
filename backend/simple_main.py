@@ -53,7 +53,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             document_id TEXT UNIQUE NOT NULL,
             title TEXT NOT NULL,
-            content TEXT,
+            text TEXT,
             agency_id TEXT,
             document_type TEXT,
             web_comment_link TEXT,
@@ -66,6 +66,16 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    
+    # Migration: Add text column if it doesn't exist and migrate data from content
+    cursor.execute("PRAGMA table_info(documents)")
+    columns = [column[1] for column in cursor.fetchall()]
+    
+    if 'text' not in columns and 'content' in columns:
+        print("Migrating content column to text column...")
+        cursor.execute("ALTER TABLE documents ADD COLUMN text TEXT")
+        cursor.execute("UPDATE documents SET text = content WHERE content IS NOT NULL")
+        print("Migration completed.")
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS comments (
@@ -107,7 +117,7 @@ def init_db():
     # No sample personas - users will create their own
     
     cursor.execute("""
-        INSERT OR IGNORE INTO documents (document_id, title, content, agency_id, document_type, web_comment_link, web_document_link, posted_date) VALUES 
+        INSERT OR IGNORE INTO documents (document_id, title, text, agency_id, document_type, web_comment_link, web_document_link, posted_date) VALUES 
         ('FCC-2025-001', 'Broadband Infrastructure Rules', 'New rules for broadband infrastructure deployment across rural areas...', 'FCC', 'Rule', 'https://example.com/comment', 'https://example.com/doc', '2025-01-15'),
         ('EPA-2025-001', 'Clean Air Act Amendments', 'Proposed amendments to clean air regulations affecting industrial emissions...', 'EPA', 'Proposed Rule', 'https://example.com/comment', 'https://example.com/doc', '2025-01-10'),
         ('FDA-2025-001', 'Food Safety Standards', 'Updated food safety standards for imports and domestic production...', 'FDA', 'Guidance', 'https://example.com/comment', 'https://example.com/doc', '2025-01-05')
@@ -240,7 +250,7 @@ class APIHandler(BaseHTTPRequestHandler):
         offset = int(query_params.get('offset', [0])[0])
         
         cursor.execute("""
-            SELECT id, document_id, title, content, agency_id, 
+            SELECT id, document_id, title, text, agency_id, 
                    document_type, web_comment_link, web_document_link, web_docket_link,
                    docket_id, embedding, posted_date, comment_end_date
             FROM documents
@@ -262,7 +272,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 'id': row[0],
                 'document_id': row[1],
                 'title': row[2],
-                'content': row[3],
+                'text': row[3],
                 'agency_id': row[4],
                 'document_type': row[5],
                 'web_comment_link': row[6],
@@ -288,7 +298,7 @@ class APIHandler(BaseHTTPRequestHandler):
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT id, document_id, title, content, agency_id, 
+            SELECT id, document_id, title, text, agency_id, 
                    document_type, web_comment_link, web_document_link, web_docket_link,
                    docket_id, embedding, posted_date, comment_end_date
             FROM documents WHERE document_id = ?
@@ -310,7 +320,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 'id': row[0],
                 'document_id': row[1],
                 'title': row[2],
-                'content': row[3],
+                'text': row[3],
                 'agency_id': row[4],
                 'document_type': row[5],
                 'web_comment_link': row[6],
@@ -343,11 +353,11 @@ class APIHandler(BaseHTTPRequestHandler):
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT id, document_id, title, content, agency_id, 
+            SELECT id, document_id, title, text, agency_id, 
                    document_type, web_comment_link, web_document_link, web_docket_link,
                    docket_id, embedding, posted_date, comment_end_date
             FROM documents
-            WHERE title LIKE ? OR content LIKE ?
+            WHERE title LIKE ? OR text LIKE ?
             ORDER BY posted_date DESC
             LIMIT ?
         """, (f'%{query}%', f'%{query}%', limit))
@@ -366,7 +376,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 'id': row[0],
                 'document_id': row[1],
                 'title': row[2],
-                'content': row[3],
+                'text': row[3],
                 'agency_id': row[4],
                 'document_type': row[5],
                 'web_comment_link': row[6],
@@ -677,7 +687,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 # Extract data from API format
                 document_id = doc.get('documentId') or doc.get('document_id', '')
                 title = doc.get('title', '')
-                content = doc.get('content', '')
+                text = doc.get('text', '')
                 agency_id = doc.get('agencyId') or doc.get('agency_id', '')
                 document_type = doc.get('documentType') or doc.get('document_type', '')
                 web_comment_link = doc.get('webCommentLink') or doc.get('web_comment_link', '')
@@ -699,22 +709,22 @@ class APIHandler(BaseHTTPRequestHandler):
                     # Update existing document
                     cursor.execute("""
                         UPDATE documents 
-                        SET title = ?, content = ?, agency_id = ?, document_type = ?,
+                        SET title = ?, text = ?, agency_id = ?, document_type = ?,
                             web_comment_link = ?, web_document_link = ?, web_docket_link = ?,
                             docket_id = ?, embedding = ?, posted_date = ?, comment_end_date = ?
                         WHERE document_id = ?
-                    """, (title, content, agency_id, document_type, 
+                    """, (title, text, agency_id, document_type, 
                           web_comment_link, web_document_link, web_docket_link,
                           docket_id, embedding_json, posted_date, comment_end_date, document_id))
                     updated_count += 1
                 else:
                     # Insert new document
                     cursor.execute("""
-                        INSERT INTO documents (document_id, title, content, agency_id, 
+                        INSERT INTO documents (document_id, title, text, agency_id, 
                                              document_type, web_comment_link, web_document_link, 
                                              web_docket_link, docket_id, embedding, posted_date, comment_end_date)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (document_id, title, content, agency_id, document_type,
+                    """, (document_id, title, text, agency_id, document_type,
                           web_comment_link, web_document_link, web_docket_link,
                           docket_id, embedding_json, posted_date, comment_end_date))
                     inserted_count += 1
@@ -788,7 +798,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 # Extract data from API format
                 document_id = doc.get('documentId') or doc.get('document_id', '')
                 title = doc.get('title', '')
-                content = doc.get('content', '')
+                text = doc.get('text', '')
                 agency_id = doc.get('agencyId') or doc.get('agency_id', '')
                 document_type = doc.get('documentType') or doc.get('document_type', '')
                 web_comment_link = doc.get('webCommentLink') or doc.get('web_comment_link', '')
@@ -810,22 +820,22 @@ class APIHandler(BaseHTTPRequestHandler):
                     # Update existing document
                     cursor.execute("""
                         UPDATE documents 
-                        SET title = ?, content = ?, agency_id = ?, document_type = ?,
+                        SET title = ?, text = ?, agency_id = ?, document_type = ?,
                             web_comment_link = ?, web_document_link = ?, web_docket_link = ?,
                             docket_id = ?, embedding = ?, posted_date = ?, comment_end_date = ?
                         WHERE document_id = ?
-                    """, (title, content, agency_id, document_type, 
+                    """, (title, text, agency_id, document_type, 
                           web_comment_link, web_document_link, web_docket_link,
                           docket_id, embedding_json, posted_date, comment_end_date, document_id))
                     updated_count += 1
                 else:
                     # Insert new document
                     cursor.execute("""
-                        INSERT INTO documents (document_id, title, content, agency_id, 
+                        INSERT INTO documents (document_id, title, text, agency_id, 
                                              document_type, web_comment_link, web_document_link, 
                                              web_docket_link, docket_id, embedding, posted_date, comment_end_date)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (document_id, title, content, agency_id, document_type,
+                    """, (document_id, title, text, agency_id, document_type,
                           web_comment_link, web_document_link, web_docket_link,
                           docket_id, embedding_json, posted_date, comment_end_date))
                     inserted_count += 1

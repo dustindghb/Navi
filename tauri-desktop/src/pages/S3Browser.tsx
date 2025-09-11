@@ -9,7 +9,7 @@ interface S3File {
 interface S3Document {
   documentId: string;
   title: string;
-  content: string;
+  text: string;  // Changed from content to text
   agencyId: string;
   documentType: string;
   webCommentLink?: string;
@@ -333,7 +333,7 @@ export function S3Browser() {
                         overflowY: 'auto',
                         whiteSpace: 'pre-wrap'
                       }}>
-                        {documentContent.content}
+                        {documentContent.text}
                       </div>
                     </div>
 

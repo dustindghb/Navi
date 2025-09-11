@@ -126,9 +126,9 @@ def _extract_document_data(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                         document = _format_document(record, item["key"])
                         documents.append(document)
                         logger.debug(f"Added document: {document.get('documentId', 'unknown')}")
-            elif isinstance(data, dict) and "embedding" in data:
-                # Handle single JSON object
-                logger.debug(f"Processing single JSON object")
+            elif isinstance(data, dict):
+                # Handle any JSON object (removed the "embedding" requirement)
+                logger.debug(f"Processing JSON object")
                 document = _format_document(data, item["key"])
                 documents.append(document)
                 logger.debug(f"Added document: {document.get('documentId', 'unknown')}")
@@ -146,7 +146,7 @@ def _format_document(data: Dict[str, Any], key: str) -> Dict[str, Any]:
     return {
         "documentId": data.get("documentId", ""),
         "title": data.get("title", ""),
-        "content": data.get("content", ""),
+        "text": data.get("text", ""),  # Changed from "content" to "text"
         "docketId": data.get("docketId", ""),
         "agencyId": data.get("agencyId", ""),
         "documentType": data.get("documentType", ""),
@@ -160,7 +160,7 @@ def _format_document(data: Dict[str, Any], key: str) -> Dict[str, Any]:
         "metadata": {
             "hasEmbedding": bool(data.get("embedding")),
             "embeddingLength": len(data.get("embedding", [])),
-            "contentLength": len(data.get("content", ""))
+            "textLength": len(data.get("text", ""))  # Changed from "contentLength" to "textLength"
         }
     }
 

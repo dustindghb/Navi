@@ -21,7 +21,7 @@ The Navi backend uses a **simplified SQLite-based architecture** designed for ea
 │ id (PK)     │    │ id (PK)     │    │ id (PK)     │
 │ name        │    │ name        │    │ document_id │
 │ role        │    │ code (UK)   │    │ title       │
-│ interests   │    └─────────────┘    │ content     │
+│ interests   │    └─────────────┘    │ text        │
 │ created_at  │                       │ agency_id   │
 └─────────────┘                       │ doc_type    │
          │                            │ web_links   │
@@ -39,7 +39,7 @@ The Navi backend uses a **simplified SQLite-based architecture** designed for ea
 │ persona_id  │◄──────────────────────────────┘
 │ document_id │
 │ title       │
-│ content     │
+│ text        │
 │ status      │
 │ created_at  │
 └─────────────┘
@@ -94,7 +94,7 @@ CREATE TABLE documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     document_id TEXT UNIQUE NOT NULL,      -- regulations.gov document ID
     title TEXT NOT NULL,
-    content TEXT,                          -- Full document content
+    text TEXT,                             -- Full document content
     agency_id TEXT,                        -- Agency code (FCC, EPA, etc.)
     document_type TEXT,                    -- Rule, Proposed Rule, Notice, etc.
     web_comment_link TEXT,                 -- Link to submit comments
@@ -112,7 +112,7 @@ CREATE TABLE documents (
 - `id`: Auto-incrementing primary key
 - `document_id`: Unique identifier from regulations.gov (e.g., "APHIS-2025-0028-0001")
 - `title`: Document title
-- `content`: Full document text content
+- `text`: Full document text content
 - `agency_id`: Agency code (references agencies.code)
 - `document_type`: Type of document (Rule, Proposed Rule, Notice, Guidance, etc.)
 - `web_comment_link`: URL to submit public comments
@@ -259,7 +259,7 @@ User Query → Database Search → Results Display
 ```
 
 1. User searches for documents
-2. Backend performs text-based search on title and content
+2. Backend performs text-based search on title and text
 3. Results are returned and displayed
 
 ## Key Features
@@ -346,7 +346,7 @@ curl -s http://localhost:8001/documents
 # Upload test data
 curl -X POST http://localhost:8001/api/upload \
   -H "Content-Type: application/json" \
-  -d '{"documents": [{"documentId": "TEST-001", "title": "Test", "content": "Test content"}]}'
+  -d '{"documents": [{"documentId": "TEST-001", "title": "Test", "text": "Test content"}]}'
 ```
 
 ### Database Inspection

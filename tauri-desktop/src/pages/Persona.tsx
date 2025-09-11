@@ -281,12 +281,13 @@ export function Persona() {
               </FormControl>
 
               <TextField
-                label="Industry/Profession"
+                label="Industry/Profession (Be Specific)"
                 value={persona.industry || ''}
                 onChange={(e) => { setPersona({ ...persona, industry: e.target.value }); setIsDirty(true); }}
-                placeholder="e.g., Technology, Healthcare, Education, Manufacturing"
+                placeholder="e.g., 'Small Business SaaS Software' instead of 'Technology', 'Telehealth Services' instead of 'Healthcare'"
                 fullWidth
                 variant="outlined"
+                helperText="⚠️ Avoid broad terms like 'Technology' or 'Healthcare' - be specific about your niche or specialization"
               />
 
               <Divider sx={{ my: 2 }} />
@@ -299,64 +300,289 @@ export function Persona() {
                 <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 2 }}>
                   Be specific! Instead of "Technology", select "AI Regulation" or "Data Privacy". This helps avoid irrelevant matches.
                 </Typography>
-                <Grid container spacing={1}>
-                  {[
-                    'Climate Change & Carbon Emissions',
-                    'Renewable Energy Standards',
-                    'Water Quality & Pollution',
-                    'Air Quality Regulations',
-                    'Waste Management & Recycling',
-                    'Healthcare Data Privacy (HIPAA)',
-                    'Drug Approval & Safety',
-                    'Medical Device Regulations',
-                    'Telehealth & Digital Health',
-                    'AI & Machine Learning Regulation',
-                    'Data Privacy & Protection',
-                    'Cybersecurity Standards',
-                    'Social Media & Content Moderation',
-                    'Cryptocurrency & Digital Assets',
-                    'Banking & Financial Services',
-                    'Consumer Credit & Lending',
-                    'Investment & Securities',
-                    'Aviation Safety & Operations',
-                    'Highway & Road Safety',
-                    'Public Transportation',
-                    'Railroad Regulations',
-                    'Student Loan & Education Finance',
-                    'School Safety & Security',
-                    'Higher Education Accreditation',
-                    'Workplace Safety (OSHA)',
-                    'Minimum Wage & Labor Standards',
-                    'Employee Benefits & Retirement',
-                    'Product Safety & Recalls',
-                    'Food Safety & Labeling',
-                    'Advertising & Marketing Practices',
-                    'Border Security & Immigration',
-                    'Cybersecurity & Critical Infrastructure',
-                    'Nuclear Energy & Safety',
-                    'Electric Grid & Power Systems',
-                    'Oil & Gas Pipeline Safety'
-                  ].map((interest) => (
-                    <Grid item xs={12} sm={6} md={4} key={interest}>
-                      <FormControlLabel
-                        control={
-                          <Checkbox
-                            checked={selectedPolicyInterests.includes(interest)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
-                              } else {
-                                setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
-                              }
-                              setIsDirty(true);
-                            }}
+                <Grid container spacing={2}>
+                  {/* Environmental & Energy */}
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" sx={{ color: '#4CAF50', fontWeight: 600, mb: 1 }}>
+                      🌱 Environmental & Energy
+                    </Typography>
+                    <Grid container spacing={1}>
+                      {[
+                        'Climate Change & Carbon Emissions',
+                        'Renewable Energy Standards',
+                        'Water Quality & Pollution',
+                        'Air Quality Regulations',
+                        'Waste Management & Recycling',
+                        'Nuclear Energy & Safety',
+                        'Electric Grid & Power Systems',
+                        'Oil & Gas Pipeline Safety'
+                      ].map((interest) => (
+                        <Grid item xs={12} sm={6} md={3} key={interest}>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={selectedPolicyInterests.includes(interest)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
+                                  } else {
+                                    setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  }
+                                  setIsDirty(true);
+                                }}
+                              />
+                            }
+                            label={interest}
+                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
                           />
-                        }
-                        label={interest}
-                        sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
-                      />
+                        </Grid>
+                      ))}
                     </Grid>
-                  ))}
+                  </Grid>
+
+                  {/* Healthcare & Medical */}
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" sx={{ color: '#2196F3', fontWeight: 600, mb: 1 }}>
+                      🏥 Healthcare & Medical
+                    </Typography>
+                    <Grid container spacing={1}>
+                      {[
+                        'Healthcare Data Privacy (HIPAA)',
+                        'Drug Approval & Safety',
+                        'Medical Device Regulations',
+                        'Telehealth & Digital Health'
+                      ].map((interest) => (
+                        <Grid item xs={12} sm={6} md={3} key={interest}>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={selectedPolicyInterests.includes(interest)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
+                                  } else {
+                                    setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  }
+                                  setIsDirty(true);
+                                }}
+                              />
+                            }
+                            label={interest}
+                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
+                          />
+                        </Grid>
+                      ))}
+                    </Grid>
+                  </Grid>
+
+                  {/* Technology & Digital */}
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" sx={{ color: '#9C27B0', fontWeight: 600, mb: 1 }}>
+                      💻 Technology & Digital
+                    </Typography>
+                    <Grid container spacing={1}>
+                      {[
+                        'AI & Machine Learning Regulation',
+                        'Data Privacy & Protection',
+                        'Cybersecurity Standards',
+                        'Social Media & Content Moderation',
+                        'Cryptocurrency & Digital Assets',
+                        'Cybersecurity & Critical Infrastructure'
+                      ].map((interest) => (
+                        <Grid item xs={12} sm={6} md={3} key={interest}>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={selectedPolicyInterests.includes(interest)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
+                                  } else {
+                                    setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  }
+                                  setIsDirty(true);
+                                }}
+                              />
+                            }
+                            label={interest}
+                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
+                          />
+                        </Grid>
+                      ))}
+                    </Grid>
+                  </Grid>
+
+                  {/* Financial & Banking */}
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" sx={{ color: '#FF9800', fontWeight: 600, mb: 1 }}>
+                      💰 Financial & Banking
+                    </Typography>
+                    <Grid container spacing={1}>
+                      {[
+                        'Banking & Financial Services',
+                        'Consumer Credit & Lending',
+                        'Investment & Securities'
+                      ].map((interest) => (
+                        <Grid item xs={12} sm={6} md={3} key={interest}>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={selectedPolicyInterests.includes(interest)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
+                                  } else {
+                                    setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  }
+                                  setIsDirty(true);
+                                }}
+                              />
+                            }
+                            label={interest}
+                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
+                          />
+                        </Grid>
+                      ))}
+                    </Grid>
+                  </Grid>
+
+                  {/* Transportation & Infrastructure */}
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" sx={{ color: '#607D8B', fontWeight: 600, mb: 1 }}>
+                      🚗 Transportation & Infrastructure
+                    </Typography>
+                    <Grid container spacing={1}>
+                      {[
+                        'Aviation Safety & Operations',
+                        'Highway & Road Safety',
+                        'Public Transportation',
+                        'Railroad Regulations'
+                      ].map((interest) => (
+                        <Grid item xs={12} sm={6} md={3} key={interest}>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={selectedPolicyInterests.includes(interest)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
+                                  } else {
+                                    setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  }
+                                  setIsDirty(true);
+                                }}
+                              />
+                            }
+                            label={interest}
+                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
+                          />
+                        </Grid>
+                      ))}
+                    </Grid>
+                  </Grid>
+
+                  {/* Education & Labor */}
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" sx={{ color: '#795548', fontWeight: 600, mb: 1 }}>
+                      🎓 Education & Labor
+                    </Typography>
+                    <Grid container spacing={1}>
+                      {[
+                        'Student Loan & Education Finance',
+                        'School Safety & Security',
+                        'Higher Education Accreditation',
+                        'Workplace Safety (OSHA)',
+                        'Minimum Wage & Labor Standards',
+                        'Employee Benefits & Retirement'
+                      ].map((interest) => (
+                        <Grid item xs={12} sm={6} md={3} key={interest}>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={selectedPolicyInterests.includes(interest)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
+                                  } else {
+                                    setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  }
+                                  setIsDirty(true);
+                                }}
+                              />
+                            }
+                            label={interest}
+                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
+                          />
+                        </Grid>
+                      ))}
+                    </Grid>
+                  </Grid>
+
+                  {/* Consumer & Safety */}
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" sx={{ color: '#E91E63', fontWeight: 600, mb: 1 }}>
+                      🛡️ Consumer & Safety
+                    </Typography>
+                    <Grid container spacing={1}>
+                      {[
+                        'Product Safety & Recalls',
+                        'Food Safety & Labeling',
+                        'Advertising & Marketing Practices'
+                      ].map((interest) => (
+                        <Grid item xs={12} sm={6} md={3} key={interest}>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={selectedPolicyInterests.includes(interest)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
+                                  } else {
+                                    setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  }
+                                  setIsDirty(true);
+                                }}
+                              />
+                            }
+                            label={interest}
+                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
+                          />
+                        </Grid>
+                      ))}
+                    </Grid>
+                  </Grid>
+
+                  {/* Security & Immigration */}
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" sx={{ color: '#F44336', fontWeight: 600, mb: 1 }}>
+                      🔒 Security & Immigration
+                    </Typography>
+                    <Grid container spacing={1}>
+                      {[
+                        'Border Security & Immigration'
+                      ].map((interest) => (
+                        <Grid item xs={12} sm={6} md={3} key={interest}>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={selectedPolicyInterests.includes(interest)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedPolicyInterests([...selectedPolicyInterests, interest]);
+                                  } else {
+                                    setSelectedPolicyInterests(selectedPolicyInterests.filter(i => i !== interest));
+                                  }
+                                  setIsDirty(true);
+                                }}
+                              />
+                            }
+                            label={interest}
+                            sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
+                          />
+                        </Grid>
+                      ))}
+                    </Grid>
+                  </Grid>
                 </Grid>
                 <Typography variant="body2" sx={{ color: '#FFA726', marginTop: 2, fontStyle: 'italic' }}>
                   💡 Tip: Select only the areas you're genuinely interested in. Too many broad categories can lead to irrelevant matches.
@@ -375,44 +601,269 @@ export function Persona() {
                 </Typography>
 
                 <Box sx={{ mb: 3 }}>
-                  <Typography variant="subtitle1" sx={{ color: '#FAFAFA', marginBottom: 1 }}>
-                    Preferred Agencies
+                  <Typography variant="subtitle1" sx={{ color: '#FAFAFA', marginBottom: 2 }}>
+                    Preferred Agencies (Grouped by Focus Area)
                   </Typography>
-                  <Grid container spacing={1}>
-                    {[
-                      'Environmental Protection Agency (EPA)',
-                      'Food and Drug Administration (FDA)',
-                      'Federal Communications Commission (FCC)',
-                      'Securities and Exchange Commission (SEC)',
-                      'Department of Transportation (DOT)',
-                      'Department of Labor (DOL)',
-                      'Department of Health and Human Services (HHS)',
-                      'Department of Energy (DOE)',
-                      'Department of Homeland Security (DHS)',
-                      'Consumer Financial Protection Bureau (CFPB)',
-                      'Federal Trade Commission (FTC)',
-                      'Other'
-                    ].map((agency) => (
-                      <Grid item xs={12} sm={6} md={4} key={agency}>
-                        <FormControlLabel
-                          control={
-                            <Checkbox
-                              checked={selectedAgencies.includes(agency)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedAgencies([...selectedAgencies, agency]);
-                                } else {
-                                  setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
-                                }
-                                setIsDirty(true);
-                              }}
+                  <Grid container spacing={2}>
+                    {/* Health & Safety */}
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" sx={{ color: '#2196F3', fontWeight: 600, mb: 1 }}>
+                        🏥 Health & Safety
+                      </Typography>
+                      <Grid container spacing={1}>
+                        {[
+                          'Food and Drug Administration (FDA)',
+                          'Department of Health and Human Services (HHS)'
+                        ].map((agency) => (
+                          <Grid item xs={12} key={agency}>
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={selectedAgencies.includes(agency)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedAgencies([...selectedAgencies, agency]);
+                                    } else {
+                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                    }
+                                    setIsDirty(true);
+                                  }}
+                                />
+                              }
+                              label={agency}
+                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
                             />
-                          }
-                          label={agency}
-                          sx={{ color: '#FAFAFA' }}
-                        />
+                          </Grid>
+                        ))}
                       </Grid>
-                    ))}
+                    </Grid>
+
+                    {/* Environment & Energy */}
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" sx={{ color: '#4CAF50', fontWeight: 600, mb: 1 }}>
+                        🌱 Environment & Energy
+                      </Typography>
+                      <Grid container spacing={1}>
+                        {[
+                          'Environmental Protection Agency (EPA)',
+                          'Department of Energy (DOE)'
+                        ].map((agency) => (
+                          <Grid item xs={12} key={agency}>
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={selectedAgencies.includes(agency)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedAgencies([...selectedAgencies, agency]);
+                                    } else {
+                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                    }
+                                    setIsDirty(true);
+                                  }}
+                                />
+                              }
+                              label={agency}
+                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                            />
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Grid>
+
+                    {/* Technology & Communications */}
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" sx={{ color: '#9C27B0', fontWeight: 600, mb: 1 }}>
+                        💻 Technology & Communications
+                      </Typography>
+                      <Grid container spacing={1}>
+                        {[
+                          'Federal Communications Commission (FCC)'
+                        ].map((agency) => (
+                          <Grid item xs={12} key={agency}>
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={selectedAgencies.includes(agency)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedAgencies([...selectedAgencies, agency]);
+                                    } else {
+                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                    }
+                                    setIsDirty(true);
+                                  }}
+                                />
+                              }
+                              label={agency}
+                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                            />
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Grid>
+
+                    {/* Financial & Consumer */}
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" sx={{ color: '#FF9800', fontWeight: 600, mb: 1 }}>
+                        💰 Financial & Consumer
+                      </Typography>
+                      <Grid container spacing={1}>
+                        {[
+                          'Securities and Exchange Commission (SEC)',
+                          'Consumer Financial Protection Bureau (CFPB)',
+                          'Federal Trade Commission (FTC)'
+                        ].map((agency) => (
+                          <Grid item xs={12} key={agency}>
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={selectedAgencies.includes(agency)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedAgencies([...selectedAgencies, agency]);
+                                    } else {
+                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                    }
+                                    setIsDirty(true);
+                                  }}
+                                />
+                              }
+                              label={agency}
+                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                            />
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Grid>
+
+                    {/* Transportation & Infrastructure */}
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" sx={{ color: '#607D8B', fontWeight: 600, mb: 1 }}>
+                        🚗 Transportation & Infrastructure
+                      </Typography>
+                      <Grid container spacing={1}>
+                        {[
+                          'Department of Transportation (DOT)'
+                        ].map((agency) => (
+                          <Grid item xs={12} key={agency}>
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={selectedAgencies.includes(agency)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedAgencies([...selectedAgencies, agency]);
+                                    } else {
+                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                    }
+                                    setIsDirty(true);
+                                  }}
+                                />
+                              }
+                              label={agency}
+                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                            />
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Grid>
+
+                    {/* Labor & Employment */}
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" sx={{ color: '#795548', fontWeight: 600, mb: 1 }}>
+                        🎓 Labor & Employment
+                      </Typography>
+                      <Grid container spacing={1}>
+                        {[
+                          'Department of Labor (DOL)'
+                        ].map((agency) => (
+                          <Grid item xs={12} key={agency}>
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={selectedAgencies.includes(agency)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedAgencies([...selectedAgencies, agency]);
+                                    } else {
+                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                    }
+                                    setIsDirty(true);
+                                  }}
+                                />
+                              }
+                              label={agency}
+                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                            />
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Grid>
+
+                    {/* Security & Immigration */}
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" sx={{ color: '#F44336', fontWeight: 600, mb: 1 }}>
+                        🔒 Security & Immigration
+                      </Typography>
+                      <Grid container spacing={1}>
+                        {[
+                          'Department of Homeland Security (DHS)'
+                        ].map((agency) => (
+                          <Grid item xs={12} key={agency}>
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={selectedAgencies.includes(agency)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedAgencies([...selectedAgencies, agency]);
+                                    } else {
+                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                    }
+                                    setIsDirty(true);
+                                  }}
+                                />
+                              }
+                              label={agency}
+                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                            />
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Grid>
+
+                    {/* Other */}
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" sx={{ color: '#9E9E9E', fontWeight: 600, mb: 1 }}>
+                        📋 Other
+                      </Typography>
+                      <Grid container spacing={1}>
+                        {[
+                          'Other'
+                        ].map((agency) => (
+                          <Grid item xs={12} key={agency}>
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={selectedAgencies.includes(agency)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedAgencies([...selectedAgencies, agency]);
+                                    } else {
+                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                    }
+                                    setIsDirty(true);
+                                  }}
+                                />
+                              }
+                              label={agency}
+                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                            />
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Grid>
                   </Grid>
                 </Box>
 
