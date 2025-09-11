@@ -768,67 +768,6 @@ export function Settings() {
     }
   };
 
-  const testUploadWithSampleData = async () => {
-    setIsUploadingToDatabase(true);
-    setUploadResult(null);
-    setApiError(null);
-
-    try {
-      console.log('=== TESTING UPLOAD WITH SAMPLE DATA ===');
-      
-      const sampleData = {
-        documents: [
-          {
-            documentId: "TEST-SAMPLE-001",
-            title: "Sample Test Document",
-            text: "This is a sample document for testing upload functionality",
-            agencyId: "TEST",
-            documentType: "Test",
-            webDocumentLink: "https://test.com/doc",
-            webDocketLink: "https://test.com/docket",
-            webCommentLink: "https://test.com/comment",
-            embedding: [0.1, 0.2, 0.3, 0.4, 0.5]
-          }
-        ]
-      };
-
-      console.log('Sample data structure:', sampleData);
-
-      // Make direct HTTP call to the upload endpoint using browser fetch only
-      console.log('Using browser fetch for sample upload...');
-      const response = await fetch('http://localhost:8001/api/upload', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(sampleData)
-      });
-      console.log('Browser fetch completed for sample upload');
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('HTTP error response:', errorText);
-        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
-      }
-
-      const result = await response.json();
-      console.log('Sample upload result:', result);
-      setUploadResult(result);
-      alert('Sample upload successful! Check the result below.');
-
-    } catch (err: any) {
-      console.error('Error in sample upload:', err);
-      console.error('Error details:', {
-        name: err?.name,
-        message: err?.message,
-        stack: err?.stack
-      });
-      setApiError(`Sample upload failed: ${err?.message || err}`);
-      alert(`Sample upload failed: ${err?.message || err}`);
-    } finally {
-      setIsUploadingToDatabase(false);
-    }
-  };
 
   const testDocumentsApi = async () => {
     setIsTestingConnectivity(true);
@@ -1644,6 +1583,217 @@ export function Settings() {
           </Alert>
         )}
 
+        {/* Download Regulations.gov Documents Panel */}
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Typography variant="h6" sx={{ mb: 1, fontWeight: 600 }}>
+            Download Regulations.gov Documents
+          </Typography>
+          
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Fetch dockets and notices from regulations.gov API and upload directly to database (auto-fetches on app startup)<br/>
+            <em>Note: Full text content is preserved and stored in the database</em>
+          </Typography>
+
+          <Box sx={{ mb: 2, p: 2, bgcolor: 'background.default', borderRadius: 1, border: '1px solid #333' }}>
+            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+              API Configuration:
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+              Source: https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/<br/>
+              Method: GET → POST to database<br/>
+              Flow: Fetch from API → Upload to localhost:8001/api/upload<br/>
+              Tauri HTTP (bypasses CORS)<br/>
+              Direct database upload, Full text preservation, Error handling
+            </Typography>
+          </Box>
+
+          {lastFetchTime && (
+            <Chip 
+              label={`Last fetched: ${new Date(lastFetchTime).toLocaleString()}`}
+              color="success"
+              size="small"
+              sx={{ mb: 2 }}
+            />
+          )}
+
+          <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
+            <Button
+              variant="contained"
+              startIcon={<DownloadIcon />}
+              onClick={() => {
+                console.log('=== FETCH & UPLOAD BUTTON CLICKED ===');
+                console.log('Button clicked at:', new Date().toISOString());
+                console.log('isFetchingApi state:', isFetchingApi);
+                console.log('About to call fetchApiData(true)');
+                fetchApiData(true);
+              }}
+              disabled={isFetchingApi}
+            >
+              {isFetchingApi && fetchProgress.isFetching ? 'Fetching & Uploading...' : 'Fetch & Upload to Database'}
+            </Button>
+            
+            <Button
+              variant="outlined"
+              onClick={testConnectivity}
+              disabled={isTestingConnectivity}
+            >
+              {isTestingConnectivity ? 'Testing...' : 'Test Connectivity'}
+            </Button>
+            
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={testDocumentsApi}
+              disabled={isTestingConnectivity}
+            >
+              {isTestingConnectivity ? 'Testing...' : 'Test Documents API'}
+            </Button>
+            
+
+            {savedData && (
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<DeleteIcon />}
+                onClick={clearSavedData}
+                disabled={isClearingData || isFetchingApi}
+              >
+                {isClearingData ? 'Clearing & Refreshing...' : 'Clear Saved Data'}
+              </Button>
+            )}
+
+
+            <Button
+              variant="outlined"
+              onClick={testDatabaseConnectivity}
+              disabled={isUploadingToDatabase}
+            >
+              Test Database Connection
+            </Button>
+
+          </Box>
+
+          {connectivityTest && (
+            <Alert 
+              severity={connectivityTest.includes('OK') ? 'success' : 'error'} 
+              sx={{ mb: 2 }}
+            >
+              <Typography variant="body2">
+                {connectivityTest}
+              </Typography>
+            </Alert>
+          )}
+
+          {isClearingData && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Typography variant="body2">
+                🔄 Clearing saved data and fetching fresh API data...
+              </Typography>
+            </Alert>
+          )}
+
+          {isUploadingToDatabase && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Typography variant="body2">
+                🚀 Uploading {savedData?.documents?.length || 0} documents with embeddings to database...
+              </Typography>
+            </Alert>
+          )}
+
+          {uploadResult && (
+            <Alert severity="success" sx={{ mb: 2 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                Database Upload Complete
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Inserted: {uploadResult.inserted} • Updated: {uploadResult.updated} • 
+                Total Processed: {uploadResult.total_processed}
+                {uploadResult.errors && uploadResult.errors.length > 0 && 
+                  ` • Errors: ${uploadResult.errors.length}`
+                }
+              </Typography>
+            </Alert>
+          )}
+
+          {fetchProgress.isFetching && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                📥 {hasAutoFetched ? 'Auto-fetching Documents...' : 'Fetching Documents...'}
+              </Typography>
+              <Typography variant="body2">
+                Fetching documents from API and uploading to database...
+                {hasAutoFetched && (
+                  <span style={{ color: '#666', fontSize: '0.8em' }}>
+                    {' '}• Auto-fetch (no saved data found)
+                  </span>
+                )}
+              </Typography>
+            </Alert>
+          )}
+
+          {savedData && (
+            <Alert severity="success" sx={{ mb: 2 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                Data saved locally
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {savedData.documents ? `${savedData.documents.length} documents` : 'Data available'} • 
+                {savedData.pagination ? ` ${savedData.pagination.fetchMode} mode` : ''} • 
+                Saved at {savedData._saved_at ? new Date(savedData._saved_at).toLocaleString() : 'Unknown time'}
+              </Typography>
+            </Alert>
+          )}
+
+          {apiData && (
+            <Box sx={{ mt: 2 }}>
+              <Button
+                variant="outlined"
+                onClick={() => setShowPreviewData(!showPreviewData)}
+                sx={{ mb: 2 }}
+              >
+                {showPreviewData ? 'Hide Data' : 'Preview Data'}
+              </Button>
+              
+              <Collapse in={showPreviewData}>
+                <Paper sx={{ 
+                  bgcolor: 'background.default',
+                  border: '1px solid #444',
+                  overflow: 'hidden'
+                }}>
+                  <Box sx={{ 
+                    p: 2, 
+                    bgcolor: '#333', 
+                    borderBottom: '1px solid #444',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                      Original Data
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {new Date().toLocaleTimeString()}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ 
+                    p: 2,
+                    maxHeight: '400px',
+                    overflowY: 'auto',
+                    overflowX: 'auto',
+                    fontSize: '12px',
+                    fontFamily: 'monospace',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    minWidth: '0'
+                  }}>
+                    {JSON.stringify(apiData, null, 2)}
+                  </Box>
+                </Paper>
+              </Collapse>
+            </Box>
+          )}
+        </Paper>
+
         {/* Remote Configuration Panel */}
         <Paper sx={{ p: 3, mb: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
@@ -2289,8 +2439,6 @@ export function Settings() {
             Configure your regulations.gov API key to enable viewing public comments on policy documents.
             <br/>
             <em>Get your free API key at: <a href="https://regulations.gov/api" target="_blank" rel="noopener noreferrer" style={{ color: '#4CAF50' }}>https://regulations.gov/api</a></em>
-            <br/>
-            <strong>Note:</strong> Regulations.gov has restricted API access. If you get "access denied" errors, you may need to contact their support to enable your API key for comment access.
           </Typography>
 
           {regulationsApiError && (
@@ -2338,7 +2486,7 @@ export function Settings() {
               Endpoint: https://api.regulations.gov/v4/comments<br/>
               Method: Two-step process (list IDs, then fetch details)<br/>
               Usage: Fetch public comments for policy documents<br/>
-              Features: Real-time comment data, Agency filtering, Date sorting, Full comment text
+              Real-time comment data, Agency filtering, Date sorting, Full comment text
             </Typography>
           </Box>
         </Paper>
@@ -2393,224 +2541,6 @@ export function Settings() {
             <Details title="Logs" data={checkRes.logs} />
           </Paper>
         )}
-
-        <Paper sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" sx={{ mb: 1, fontWeight: 600 }}>
-            Regulations.gov Data
-          </Typography>
-          
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Fetch dockets and notices from regulations.gov API and upload directly to database (auto-fetches on app startup)<br/>
-            <em>Note: Full text content is preserved and stored in the database</em>
-          </Typography>
-
-          <Box sx={{ mb: 2, p: 2, bgcolor: 'background.default', borderRadius: 1, border: '1px solid #333' }}>
-            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
-              API Configuration:
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
-              Source: https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/<br/>
-              Method: GET → POST to database<br/>
-              Flow: Fetch from API → Upload to localhost:8001/api/upload<br/>
-              Client: Tauri HTTP (bypasses CORS)<br/>
-              Features: Direct database upload, Full text preservation, Error handling
-            </Typography>
-          </Box>
-
-          {lastFetchTime && (
-            <Chip 
-              label={`Last fetched: ${new Date(lastFetchTime).toLocaleString()}`}
-              color="success"
-              size="small"
-              sx={{ mb: 2 }}
-            />
-          )}
-
-          <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
-            <Button
-              variant="contained"
-              startIcon={<DownloadIcon />}
-              onClick={() => {
-                console.log('=== FETCH & UPLOAD BUTTON CLICKED ===');
-                console.log('Button clicked at:', new Date().toISOString());
-                console.log('isFetchingApi state:', isFetchingApi);
-                console.log('About to call fetchApiData(true)');
-                fetchApiData(true);
-              }}
-              disabled={isFetchingApi}
-            >
-              {isFetchingApi && fetchProgress.isFetching ? 'Fetching & Uploading...' : 'Fetch & Upload to Database'}
-            </Button>
-            
-            <Button
-              variant="outlined"
-              onClick={testConnectivity}
-              disabled={isTestingConnectivity}
-            >
-              {isTestingConnectivity ? 'Testing...' : 'Test Connectivity'}
-            </Button>
-            
-            <Button
-              variant="outlined"
-              color="secondary"
-              onClick={testDocumentsApi}
-              disabled={isTestingConnectivity}
-            >
-              {isTestingConnectivity ? 'Testing...' : 'Test Documents API'}
-            </Button>
-            
-
-            {savedData && (
-              <Button
-                variant="outlined"
-                color="error"
-                startIcon={<DeleteIcon />}
-                onClick={clearSavedData}
-                disabled={isClearingData || isFetchingApi}
-              >
-                {isClearingData ? 'Clearing & Refreshing...' : 'Clear Saved Data'}
-              </Button>
-            )}
-
-
-            <Button
-              variant="outlined"
-              onClick={testDatabaseConnectivity}
-              disabled={isUploadingToDatabase}
-            >
-              Test Database Connection
-            </Button>
-
-            <Button
-              variant="outlined"
-              color="secondary"
-              onClick={testUploadWithSampleData}
-              disabled={isUploadingToDatabase}
-            >
-              Test Upload (Sample Data)
-            </Button>
-          </Box>
-
-          {connectivityTest && (
-            <Alert 
-              severity={connectivityTest.includes('OK') ? 'success' : 'error'} 
-              sx={{ mb: 2 }}
-            >
-              <Typography variant="body2">
-                {connectivityTest}
-              </Typography>
-            </Alert>
-          )}
-
-          {isClearingData && (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              <Typography variant="body2">
-                🔄 Clearing saved data and fetching fresh API data...
-              </Typography>
-            </Alert>
-          )}
-
-          {isUploadingToDatabase && (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              <Typography variant="body2">
-                🚀 Uploading {savedData?.documents?.length || 0} documents with embeddings to database...
-              </Typography>
-            </Alert>
-          )}
-
-          {uploadResult && (
-            <Alert severity="success" sx={{ mb: 2 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-                Database Upload Complete
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Inserted: {uploadResult.inserted} • Updated: {uploadResult.updated} • 
-                Total Processed: {uploadResult.total_processed}
-                {uploadResult.errors && uploadResult.errors.length > 0 && 
-                  ` • Errors: ${uploadResult.errors.length}`
-                }
-              </Typography>
-            </Alert>
-          )}
-
-          {fetchProgress.isFetching && (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-                📥 {hasAutoFetched ? 'Auto-fetching Documents...' : 'Fetching Documents...'}
-              </Typography>
-              <Typography variant="body2">
-                Fetching documents from API and uploading to database...
-                {hasAutoFetched && (
-                  <span style={{ color: '#666', fontSize: '0.8em' }}>
-                    {' '}• Auto-fetch (no saved data found)
-                  </span>
-                )}
-              </Typography>
-            </Alert>
-          )}
-
-          {savedData && (
-            <Alert severity="success" sx={{ mb: 2 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-                Data saved locally
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {savedData.documents ? `${savedData.documents.length} documents` : 'Data available'} • 
-                {savedData.pagination ? ` ${savedData.pagination.fetchMode} mode` : ''} • 
-                Saved at {savedData._saved_at ? new Date(savedData._saved_at).toLocaleString() : 'Unknown time'}
-              </Typography>
-            </Alert>
-          )}
-
-          {apiData && (
-            <Box sx={{ mt: 2 }}>
-              <Button
-                variant="outlined"
-                onClick={() => setShowPreviewData(!showPreviewData)}
-                sx={{ mb: 2 }}
-              >
-                {showPreviewData ? 'Hide Data' : 'Preview Data'}
-              </Button>
-              
-              <Collapse in={showPreviewData}>
-                <Paper sx={{ 
-                  bgcolor: 'background.default',
-                  border: '1px solid #444',
-                  overflow: 'hidden'
-                }}>
-                  <Box sx={{ 
-                    p: 2, 
-                    bgcolor: '#333', 
-                    borderBottom: '1px solid #444',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                      Original Data
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {new Date().toLocaleTimeString()}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ 
-                    p: 2,
-                    maxHeight: '400px',
-                    overflowY: 'auto',
-                    overflowX: 'auto',
-                    fontSize: '12px',
-                    fontFamily: 'monospace',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    minWidth: '0'
-                  }}>
-                    {JSON.stringify(apiData, null, 2)}
-                  </Box>
-                </Paper>
-              </Collapse>
-            </Box>
-          )}
-        </Paper>
       </Box>
     </Box>
   );

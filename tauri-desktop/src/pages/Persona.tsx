@@ -519,7 +519,7 @@ export function Persona() {
 • I'm a small business owner in the food industry and need to understand FDA labeling requirements"
                       fullWidth
                       multiline
-                      rows={6}
+                      rows={10}
                       variant="outlined"
                       sx={{
                         '& .MuiOutlinedInput-root': {

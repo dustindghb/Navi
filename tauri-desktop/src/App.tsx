@@ -19,7 +19,6 @@ export function App() {
         <aside style={{ width: 280, background: '#1A1A1A', borderRight: '1px solid #333' }}>
           <div style={{ padding: 20, borderBottom: '1px solid #333' }}>
             <div style={{ fontSize: 24, fontWeight: 700 }}>Navi</div>
-            <div style={{ fontSize: 14, color: '#B8B8B8' }}>Civic Engagement Assistant</div>
           </div>
           <nav style={{ paddingTop: 10 }}>
             <button onClick={() => setView('dashboard')} style={navStyle(view === 'dashboard')}>Dashboard</button>

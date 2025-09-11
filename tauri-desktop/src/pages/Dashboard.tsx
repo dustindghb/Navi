@@ -1461,9 +1461,6 @@ Focus on providing actionable insights and clear categorization of the comments.
         flexShrink: 0
       }}>
         <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700 }}>Dashboard</h1>
-        <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: '#B8B8B8' }}>
-          Semantic matching between your persona and government documents
-        </p>
       </div>
       
       <div style={{ 
@@ -1621,7 +1618,7 @@ Focus on providing actionable insights and clear categorization of the comments.
                     opacity: (isLoading || !persona?.embedding || documents.length === 0) ? 0.5 : 1
                   }}
                 >
-                  {isLoading ? (isGeneratingReasoning ? `Analyzing... (${reasoningProgress.current}/${reasoningProgress.total})` : 'Finding...') : `Analyze Top ${topK} Matches`}
+                  {isLoading ? (isGeneratingReasoning ? `Analyzing... (${reasoningProgress.current}/${reasoningProgress.total})` : 'Finding...') : `Top ${topK} Semantic Matches`}
                 </button>
               </div>
             
