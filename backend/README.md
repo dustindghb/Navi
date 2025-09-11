@@ -103,6 +103,7 @@ CREATE TABLE documents (
     docket_id TEXT,                        -- Docket identifier
     embedding TEXT,                        -- JSON array of embedding vectors
     posted_date TIMESTAMP,                 -- When document was posted
+    comment_end_date TIMESTAMP,            -- When comment period ends
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```

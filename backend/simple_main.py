@@ -24,10 +24,18 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS personas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
+            name TEXT,
             role TEXT,
-            interests TEXT DEFAULT '[]',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            location TEXT,
+            age_range TEXT,
+            employment_status TEXT,
+            industry TEXT,
+            policy_interests TEXT DEFAULT '[]',
+            preferred_agencies TEXT DEFAULT '[]',
+            impact_level TEXT DEFAULT '[]',
+            additional_context TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     
@@ -53,6 +61,7 @@ def init_db():
             docket_id TEXT,
             embedding TEXT,
             posted_date TIMESTAMP,
+            comment_end_date TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -70,6 +79,14 @@ def init_db():
         )
     """)
     
+    # Add comment_end_date column if it doesn't exist (migration)
+    try:
+        cursor.execute("ALTER TABLE documents ADD COLUMN comment_end_date TIMESTAMP")
+        conn.commit()
+    except sqlite3.OperationalError:
+        # Column already exists, ignore
+        pass
+    
     # Insert sample data
     cursor.execute("""
         INSERT OR IGNORE INTO agencies (name, code) VALUES 
@@ -77,6 +94,8 @@ def init_db():
         ('Environmental Protection Agency', 'EPA'),
         ('Food and Drug Administration', 'FDA')
     """)
+    
+    # No sample personas - users will create their own
     
     cursor.execute("""
         INSERT OR IGNORE INTO documents (document_id, title, content, agency_id, document_type, web_comment_link, web_document_link, posted_date) VALUES 
@@ -113,6 +132,9 @@ class APIHandler(BaseHTTPRequestHandler):
             else:
                 self.get_document(document_id)
                 
+        elif path == '/personas':
+            self.get_all_personas()
+            
         elif path.startswith('/personas/'):
             persona_id = int(path.split('/')[-1])
             self.get_persona(persona_id)
@@ -124,6 +146,31 @@ class APIHandler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
+    
+    def do_PUT(self):
+        """Handle PUT requests"""
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+        query_params = parse_qs(parsed_path.query)
+        
+        # Handle requests without Content-Length header
+        content_length = self.headers.get('Content-Length')
+        if content_length:
+            content_length = int(content_length)
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+        else:
+            data = {}
+        
+        if path.startswith('/personas/'):
+            persona_id = int(path.split('/')[-1])
+            self.update_persona(persona_id, data)
+        else:
+            self.send_response(404)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Endpoint not found"}).encode())
     
     def do_OPTIONS(self):
         """Handle CORS preflight requests"""
@@ -140,9 +187,14 @@ class APIHandler(BaseHTTPRequestHandler):
         path = parsed_path.path
         query_params = parse_qs(parsed_path.query)
         
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        data = json.loads(post_data.decode('utf-8'))
+        # Handle requests without Content-Length header
+        content_length = self.headers.get('Content-Length')
+        if content_length:
+            content_length = int(content_length)
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+        else:
+            data = {}
         
         if path == '/personas':
             self.create_persona(data)
@@ -175,7 +227,7 @@ class APIHandler(BaseHTTPRequestHandler):
         cursor.execute("""
             SELECT id, document_id, title, content, agency_id, 
                    document_type, web_comment_link, web_document_link, web_docket_link,
-                   docket_id, embedding, posted_date
+                   docket_id, embedding, posted_date, comment_end_date
             FROM documents
             ORDER BY posted_date DESC
             LIMIT ? OFFSET ?
@@ -203,7 +255,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 'web_docket_link': row[8],
                 'docket_id': row[9],
                 'embedding': embedding,
-                'posted_date': row[11]
+                'posted_date': row[11],
+                'comment_end_date': row[12]
             })
         
         conn.close()
@@ -222,7 +275,7 @@ class APIHandler(BaseHTTPRequestHandler):
         cursor.execute("""
             SELECT id, document_id, title, content, agency_id, 
                    document_type, web_comment_link, web_document_link, web_docket_link,
-                   docket_id, embedding, posted_date
+                   docket_id, embedding, posted_date, comment_end_date
             FROM documents WHERE document_id = ?
         """, (document_id,))
         
@@ -250,7 +303,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 'web_docket_link': row[8],
                 'docket_id': row[9],
                 'embedding': embedding,
-                'posted_date': row[11]
+                'posted_date': row[11],
+                'comment_end_date': row[12]
             }
             
             self.send_response(200)
@@ -276,7 +330,7 @@ class APIHandler(BaseHTTPRequestHandler):
         cursor.execute("""
             SELECT id, document_id, title, content, agency_id, 
                    document_type, web_comment_link, web_document_link, web_docket_link,
-                   docket_id, embedding, posted_date
+                   docket_id, embedding, posted_date, comment_end_date
             FROM documents
             WHERE title LIKE ? OR content LIKE ?
             ORDER BY posted_date DESC
@@ -305,7 +359,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 'web_docket_link': row[8],
                 'docket_id': row[9],
                 'embedding': embedding,
-                'posted_date': row[11]
+                'posted_date': row[11],
+                'comment_end_date': row[12]
             })
         
         conn.close()
@@ -324,9 +379,21 @@ class APIHandler(BaseHTTPRequestHandler):
         cursor = conn.cursor()
         
         cursor.execute("""
-            INSERT INTO personas (name, role, interests)
-            VALUES (?, ?, ?)
-        """, (data['name'], data.get('role'), json.dumps(data.get('interests', []))))
+            INSERT INTO personas (name, role, location, age_range, employment_status, industry,
+                                policy_interests, preferred_agencies, impact_level, additional_context)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data.get('name'),
+            data.get('role'),
+            data.get('location'),
+            data.get('age_range'),
+            data.get('employment_status'),
+            data.get('industry'),
+            json.dumps(data.get('policy_interests', [])),
+            json.dumps(data.get('preferred_agencies', [])),
+            json.dumps(data.get('impact_level', [])),
+            data.get('additional_context')
+        ))
         
         persona_id = cursor.lastrowid
         conn.commit()
@@ -334,10 +401,18 @@ class APIHandler(BaseHTTPRequestHandler):
         
         result = {
             'id': persona_id,
-            'name': data['name'],
+            'name': data.get('name'),
             'role': data.get('role'),
-            'interests': data.get('interests', []),
-            'created_at': datetime.now().isoformat()
+            'location': data.get('location'),
+            'age_range': data.get('age_range'),
+            'employment_status': data.get('employment_status'),
+            'industry': data.get('industry'),
+            'policy_interests': data.get('policy_interests', []),
+            'preferred_agencies': data.get('preferred_agencies', []),
+            'impact_level': data.get('impact_level', []),
+            'additional_context': data.get('additional_context'),
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat()
         }
         
         self.send_response(201)
@@ -346,13 +421,111 @@ class APIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(result).encode())
     
+    def update_persona(self, persona_id, data):
+        """Update an existing persona"""
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE personas 
+            SET name = ?, role = ?, location = ?, age_range = ?, employment_status = ?, 
+                industry = ?, policy_interests = ?, preferred_agencies = ?, 
+                impact_level = ?, additional_context = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (
+            data.get('name'),
+            data.get('role'),
+            data.get('location'),
+            data.get('age_range'),
+            data.get('employment_status'),
+            data.get('industry'),
+            json.dumps(data.get('policy_interests', [])),
+            json.dumps(data.get('preferred_agencies', [])),
+            json.dumps(data.get('impact_level', [])),
+            data.get('additional_context'),
+            persona_id
+        ))
+        
+        if cursor.rowcount > 0:
+            conn.commit()
+            conn.close()
+            
+            result = {
+                'id': persona_id,
+                'name': data.get('name'),
+                'role': data.get('role'),
+                'location': data.get('location'),
+                'age_range': data.get('age_range'),
+                'employment_status': data.get('employment_status'),
+                'industry': data.get('industry'),
+                'policy_interests': data.get('policy_interests', []),
+                'preferred_agencies': data.get('preferred_agencies', []),
+                'impact_level': data.get('impact_level', []),
+                'additional_context': data.get('additional_context'),
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        else:
+            conn.close()
+            self.send_response(404)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Persona not found"}).encode())
+    
+    def get_all_personas(self):
+        """Get all personas"""
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, name, role, location, age_range, employment_status, industry,
+                   policy_interests, preferred_agencies, impact_level, additional_context,
+                   created_at, updated_at
+            FROM personas
+            ORDER BY created_at DESC
+        """)
+        
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                'id': row[0],
+                'name': row[1],
+                'role': row[2],
+                'location': row[3],
+                'age_range': row[4],
+                'employment_status': row[5],
+                'industry': row[6],
+                'policy_interests': json.loads(row[7]) if row[7] else [],
+                'preferred_agencies': json.loads(row[8]) if row[8] else [],
+                'impact_level': json.loads(row[9]) if row[9] else [],
+                'additional_context': row[10],
+                'created_at': row[11],
+                'updated_at': row[12]
+            })
+        
+        conn.close()
+        
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps(results).encode())
+    
     def get_persona(self, persona_id):
         """Get persona by ID"""
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT id, name, role, interests, created_at
+            SELECT id, name, role, location, age_range, employment_status, industry,
+                   policy_interests, preferred_agencies, impact_level, additional_context,
+                   created_at, updated_at
             FROM personas WHERE id = ?
         """, (persona_id,))
         
@@ -364,8 +537,16 @@ class APIHandler(BaseHTTPRequestHandler):
                 'id': row[0],
                 'name': row[1],
                 'role': row[2],
-                'interests': json.loads(row[3]),
-                'created_at': row[4]
+                'location': row[3],
+                'age_range': row[4],
+                'employment_status': row[5],
+                'industry': row[6],
+                'policy_interests': json.loads(row[7]) if row[7] else [],
+                'preferred_agencies': json.loads(row[8]) if row[8] else [],
+                'impact_level': json.loads(row[9]) if row[9] else [],
+                'additional_context': row[10],
+                'created_at': row[11],
+                'updated_at': row[12]
             }
             
             self.send_response(200)
@@ -470,6 +651,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 docket_id = doc.get('docketId') or doc.get('docket_id', '')
                 embedding = doc.get('embedding', [])
                 posted_date = doc.get('postedDate') or doc.get('posted_date', '')
+                comment_end_date = doc.get('commentEndDate') or doc.get('comment_end_date', '')
                 
                 # Convert embedding array to JSON string for storage
                 embedding_json = json.dumps(embedding) if embedding else None
@@ -484,22 +666,22 @@ class APIHandler(BaseHTTPRequestHandler):
                         UPDATE documents 
                         SET title = ?, content = ?, agency_id = ?, document_type = ?,
                             web_comment_link = ?, web_document_link = ?, web_docket_link = ?,
-                            docket_id = ?, embedding = ?, posted_date = ?
+                            docket_id = ?, embedding = ?, posted_date = ?, comment_end_date = ?
                         WHERE document_id = ?
                     """, (title, content, agency_id, document_type, 
                           web_comment_link, web_document_link, web_docket_link,
-                          docket_id, embedding_json, posted_date, document_id))
+                          docket_id, embedding_json, posted_date, comment_end_date, document_id))
                     updated_count += 1
                 else:
                     # Insert new document
                     cursor.execute("""
                         INSERT INTO documents (document_id, title, content, agency_id, 
                                              document_type, web_comment_link, web_document_link, 
-                                             web_docket_link, docket_id, embedding, posted_date)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                             web_docket_link, docket_id, embedding, posted_date, comment_end_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (document_id, title, content, agency_id, document_type,
                           web_comment_link, web_document_link, web_docket_link,
-                          docket_id, embedding_json, posted_date))
+                          docket_id, embedding_json, posted_date, comment_end_date))
                     inserted_count += 1
                     
             except Exception as e:
@@ -580,6 +762,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 docket_id = doc.get('docketId') or doc.get('docket_id', '')
                 embedding = doc.get('embedding', [])
                 posted_date = doc.get('postedDate') or doc.get('posted_date', '')
+                comment_end_date = doc.get('commentEndDate') or doc.get('comment_end_date', '')
                 
                 # Convert embedding array to JSON string for storage
                 embedding_json = json.dumps(embedding) if embedding else None
@@ -594,22 +777,22 @@ class APIHandler(BaseHTTPRequestHandler):
                         UPDATE documents 
                         SET title = ?, content = ?, agency_id = ?, document_type = ?,
                             web_comment_link = ?, web_document_link = ?, web_docket_link = ?,
-                            docket_id = ?, embedding = ?, posted_date = ?
+                            docket_id = ?, embedding = ?, posted_date = ?, comment_end_date = ?
                         WHERE document_id = ?
                     """, (title, content, agency_id, document_type, 
                           web_comment_link, web_document_link, web_docket_link,
-                          docket_id, embedding_json, posted_date, document_id))
+                          docket_id, embedding_json, posted_date, comment_end_date, document_id))
                     updated_count += 1
                 else:
                     # Insert new document
                     cursor.execute("""
                         INSERT INTO documents (document_id, title, content, agency_id, 
                                              document_type, web_comment_link, web_document_link, 
-                                             web_docket_link, docket_id, embedding, posted_date)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                             web_docket_link, docket_id, embedding, posted_date, comment_end_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (document_id, title, content, agency_id, document_type,
                           web_comment_link, web_document_link, web_docket_link,
-                          docket_id, embedding_json, posted_date))
+                          docket_id, embedding_json, posted_date, comment_end_date))
                     inserted_count += 1
                     
             except Exception as e:

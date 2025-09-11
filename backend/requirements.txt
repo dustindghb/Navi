@@ -1,4 +1,7 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-psycopg2-binary==2.9.7
-pydantic==2.4.2
+# SQLite backend requires no external dependencies
+# All required modules are built into Python 3.13+
+# - sqlite3 (built-in)
+# - json (built-in)
+# - http.server (built-in)
+# - urllib.parse (built-in)
+# - datetime (built-in)

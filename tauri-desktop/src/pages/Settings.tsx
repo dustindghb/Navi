@@ -24,7 +24,7 @@ import {
   Computer as ComputerIcon,
   Cloud as CloudIcon
 } from '@mui/icons-material';
-// import { fetch as tauriFetch } from '@tauri-apps/plugin-http'; // Not using Tauri HTTP due to issues
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 
 // Type definitions for local Ollama configuration
 // interface OllamaDefaults {
@@ -269,7 +269,15 @@ export function Settings() {
   };
 
   const fetchApiData = async (fetchAll: boolean = false) => {
-    setIsFetchingApi(true);
+    try {
+      console.log('=== FETCH API DATA FUNCTION CALLED ===');
+      console.log('fetchAll parameter:', fetchAll);
+      console.log('Current state - isFetchingApi:', isFetchingApi);
+      console.log('Current state - baseUrl will be set in function');
+      console.log('Function execution started at:', new Date().toISOString());
+      console.log('Function is executing...');
+      
+      setIsFetchingApi(true);
     setApiError(null);
     setHasAutoFetched(false); // Reset auto-fetch flag for manual fetches
     setFetchProgress({
@@ -281,6 +289,7 @@ export function Settings() {
 
     console.log('=== API FETCH START ===');
     console.log('Fetch mode:', fetchAll ? 'Fetch All (with pagination)' : 'Fetch Sample (50 documents)');
+    console.log('State updated - isFetchingApi set to true');
 
     try {
       const baseUrl = 'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/';
@@ -293,25 +302,64 @@ export function Settings() {
       // First, get total count
       console.log('Getting total document count...');
       const countUrl = `${baseUrl}?limit=1&offset=0`;
+      console.log('Count URL constructed:', countUrl);
       
-      // Use browser fetch only
-      console.log('Using browser fetch for count...');
-      const countResponse = await fetch(countUrl, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
+        // Try Tauri HTTP client first (bypasses CORS), then fallback to browser fetch
+        console.log('About to make fetch request to:', countUrl);
+        let countResponse;
+        try {
+          // Try Tauri HTTP client first (bypasses CORS)
+          console.log('Trying Tauri HTTP client for count...');
+          countResponse = await tauriFetch(countUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            }
+          });
+          console.log('Tauri HTTP client succeeded for count');
+        } catch (tauriError) {
+          console.log(`Tauri HTTP client failed for count, trying browser fetch... ${tauriError}`);
+          // Fallback to browser fetch
+          countResponse = await fetch(countUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            mode: 'cors',
+            cache: 'no-cache'
+          });
+          console.log('Browser fetch completed for count');
         }
-      });
-      console.log('Count fetch via browser completed');
+        
+        console.log('Count fetch via browser completed');
+        console.log('Count response status:', countResponse.status);
+        console.log('Count response ok:', countResponse.ok);
+        console.log('Count response statusText:', countResponse.statusText);
+        console.log('Count response headers:', Object.fromEntries(countResponse.headers.entries()));
 
       if (!countResponse.ok) {
+        console.error('Count response not OK, attempting to read error text...');
         const errorText = await countResponse.text();
         console.error('Count API Error Response:', errorText);
+        console.error('Count API Error Details:', {
+          status: countResponse.status,
+          statusText: countResponse.statusText,
+          url: countUrl,
+          errorText: errorText
+        });
         throw new Error(`Count HTTP ${countResponse.status}: ${countResponse.statusText} - ${errorText}`);
       }
 
+      console.log('Count response is OK, attempting to parse JSON...');
       const countData = await countResponse.json();
+      console.log('Count data received:', {
+        success: countData.success,
+        total: countData.data?.pagination?.total || 0,
+        fullResponse: countData
+      });
+      
       totalDocuments = countData.data?.pagination?.total || 0;
       console.log('Total documents available:', totalDocuments);
 
@@ -328,9 +376,20 @@ export function Settings() {
       }));
 
       // Fetch documents in batches
+      console.log('Starting batch fetching loop...');
+      console.log('Loop conditions:', {
+        offset,
+        totalDocuments,
+        fetchAll,
+        batchCount,
+        shouldContinue: offset < totalDocuments && (fetchAll || batchCount === 0)
+      });
+      
       while (offset < totalDocuments && (fetchAll || batchCount === 0)) {
         batchCount++;
+        console.log(`=== BATCH ${batchCount} START ===`);
         console.log(`Fetching batch ${batchCount}/${totalBatches} (offset: ${offset}, limit: ${limit})`);
+        console.log(`Batch URL will be: ${baseUrl}?limit=${limit}&offset=${offset}`);
         
         setFetchProgress(prev => ({
           ...prev,
@@ -338,37 +397,110 @@ export function Settings() {
         }));
 
         const batchUrl = `${baseUrl}?limit=${limit}&offset=${offset}`;
+        console.log(`Batch URL constructed: ${batchUrl}`);
         
         // Use browser fetch only
         console.log(`Using browser fetch for batch ${batchCount}...`);
-        const batchResponse = await fetch(batchUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          }
-        });
+        console.log(`About to make fetch request to:`, batchUrl);
+        let batchResponse;
+        try {
+          // Try Tauri HTTP client first (bypasses CORS)
+          console.log(`Trying Tauri HTTP client for batch ${batchCount}...`);
+          batchResponse = await tauriFetch(batchUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            }
+          });
+          console.log(`Tauri HTTP client succeeded for batch ${batchCount}`);
+        } catch (tauriError) {
+          console.log(`Tauri HTTP client failed for batch ${batchCount}, trying browser fetch... ${tauriError}`);
+          // Fallback to browser fetch
+          batchResponse = await fetch(batchUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            mode: 'cors',
+            cache: 'no-cache'
+          });
+          console.log(`Browser fetch completed for batch ${batchCount}`);
+        }
+        
         console.log(`Batch ${batchCount} fetch via browser completed`);
+        console.log(`Batch ${batchCount} response status:`, batchResponse.status);
+        console.log(`Batch ${batchCount} response ok:`, batchResponse.ok);
+        console.log(`Batch ${batchCount} response statusText:`, batchResponse.statusText);
+        console.log(`Batch ${batchCount} response headers:`, Object.fromEntries(batchResponse.headers.entries()));
 
         if (!batchResponse.ok) {
+          console.error(`Batch ${batchCount} response not OK, attempting to read error text...`);
           const errorText = await batchResponse.text();
           console.error(`Batch ${batchCount} API Error Response:`, errorText);
+          console.error(`Batch ${batchCount} API Error Details:`, {
+            status: batchResponse.status,
+            statusText: batchResponse.statusText,
+            url: batchUrl,
+            errorText: errorText
+          });
           throw new Error(`Batch ${batchCount} HTTP ${batchResponse.status}: ${batchResponse.statusText} - ${errorText}`);
         }
 
+        console.log(`Batch ${batchCount} response is OK, attempting to parse JSON...`);
         const batchData = await batchResponse.json();
         console.log(`Batch ${batchCount} received:`, {
           success: batchData.success,
           documentCount: batchData.data?.documents?.length || 0,
-          pagination: batchData.data?.pagination
+          pagination: batchData.data?.pagination,
+          fullResponse: batchData
         });
 
         if (batchData.success && batchData.data?.documents) {
-          allDocuments = [...allDocuments, ...batchData.data.documents];
+          console.log(`Batch ${batchCount} processing ${batchData.data.documents.length} documents...`);
+          
+          // Process documents to add missing fields
+          const processedDocuments = batchData.data.documents.map((doc: any, index: number) => {
+            console.log(`Processing document ${index + 1} in batch ${batchCount}:`, {
+              documentId: doc.documentId,
+              hasCommentEndDate: !!doc.commentEndDate,
+              commentEndDate: doc.commentEndDate
+            });
+            
+            // Calculate withinCommentPeriod based on commentEndDate
+            let withinCommentPeriod = undefined;
+            if (doc.commentEndDate) {
+              const endDate = new Date(doc.commentEndDate);
+              const now = new Date();
+              withinCommentPeriod = now <= endDate;
+              console.log(`Document ${index + 1} withinCommentPeriod calculation:`, {
+                endDate: endDate.toISOString(),
+                now: now.toISOString(),
+                withinCommentPeriod
+              });
+            }
+            
+            return {
+              ...doc,
+              withinCommentPeriod
+            };
+          });
+          
+          console.log(`Batch ${batchCount} processed ${processedDocuments.length} documents`);
+          allDocuments = [...allDocuments, ...processedDocuments];
+          console.log(`Total documents collected so far: ${allDocuments.length}`);
+          
           setFetchProgress(prev => ({
             ...prev,
             documentsFetched: allDocuments.length
           }));
+        } else {
+          console.warn(`Batch ${batchCount} had no documents or was not successful:`, {
+            success: batchData.success,
+            hasDocuments: !!batchData.data?.documents,
+            documentCount: batchData.data?.documents?.length || 0
+          });
         }
 
         // Update pagination config
@@ -382,16 +514,23 @@ export function Settings() {
         }
 
         offset += limit;
+        console.log(`Batch ${batchCount} completed. Updated offset to: ${offset}`);
 
         // If not fetching all, break after first batch
         if (!fetchAll) {
+          console.log(`Not fetching all, breaking after first batch (batch ${batchCount})`);
           break;
         }
 
         // Add small delay between batches to be respectful to the API
         if (offset < totalDocuments) {
+          console.log(`Adding 100ms delay before next batch (offset: ${offset}, total: ${totalDocuments})`);
           await new Promise(resolve => setTimeout(resolve, 100));
+        } else {
+          console.log(`No more batches needed (offset: ${offset}, total: ${totalDocuments})`);
         }
+        
+        console.log(`=== BATCH ${batchCount} END ===`);
       }
 
       console.log('=== ALL DATA RECEIVED ===');
@@ -403,10 +542,14 @@ export function Settings() {
         embeddingLength: allDocuments[0].embedding?.length || 0,
         hasContent: !!allDocuments[0].content,
         contentLength: allDocuments[0].content?.length || 0,
+        hasPostedDate: !!allDocuments[0].postedDate,
+        hasCommentEndDate: !!allDocuments[0].commentEndDate,
+        withinCommentPeriod: allDocuments[0].withinCommentPeriod,
         allKeys: Object.keys(allDocuments[0])
       } : 'No documents');
 
       // Format the data for storage
+      console.log('Formatting data for storage...');
       const formattedData = {
         documents: allDocuments,
         pagination: {
@@ -418,14 +561,29 @@ export function Settings() {
         },
         _saved_at: new Date().toISOString()
       };
+      
+      console.log('Formatted data structure:', {
+        documentCount: formattedData.documents.length,
+        pagination: formattedData.pagination,
+        savedAt: formattedData._saved_at
+      });
 
       // Save the data to localStorage
-      localStorage.setItem('navi-regulations-data', JSON.stringify(formattedData));
-      localStorage.setItem('navi-last-fetch', formattedData._saved_at);
+      console.log('Saving data to localStorage...');
+      try {
+        localStorage.setItem('navi-regulations-data', JSON.stringify(formattedData));
+        localStorage.setItem('navi-last-fetch', formattedData._saved_at);
+        console.log('Data successfully saved to localStorage');
+      } catch (storageError) {
+        console.error('Error saving to localStorage:', storageError);
+        throw new Error(`Failed to save data to localStorage: ${storageError}`);
+      }
       
+      console.log('Updating component state...');
       setSavedData(formattedData);
       setApiData(formattedData);
       setLastFetchTime(new Date().toISOString());
+      console.log('Component state updated successfully');
       
       console.log('Data saved to localStorage:', {
         totalDocuments: allDocuments.length,
@@ -434,17 +592,28 @@ export function Settings() {
       });
       
       // Dispatch custom event to notify other components
+      console.log('Dispatching storage change event...');
       window.dispatchEvent(new CustomEvent('storageChange', {
         detail: { key: 'navi-regulations-data', value: formattedData }
       }));
+      console.log('Storage change event dispatched');
       
-    } catch (err) {
+      console.log('=== FETCH API DATA COMPLETED SUCCESSFULLY ===');
+      
+    } catch (err: any) {
       console.error('=== API FETCH ERROR ===');
+      console.error('Error occurred at:', new Date().toISOString());
       console.error('Error type:', typeof err);
       console.error('Error constructor:', err?.constructor?.name);
       console.error('Error message:', err instanceof Error ? err.message : String(err));
       console.error('Error stack:', err instanceof Error ? err.stack : 'No stack trace');
       console.error('Full error object:', err);
+      
+      // Log current state at time of error
+      console.error('State at time of error:', {
+        isFetchingApi,
+        fetchAll
+      });
       
       // More detailed error message
       let errorMessage = 'Failed to fetch data from API';
@@ -455,13 +624,18 @@ export function Settings() {
           errorMessage = `HTTP error: ${err.message}`;
         } else if (err.message.includes('permission') || err.message.includes('capability')) {
           errorMessage = `Permission error: ${err.message}. Check Tauri capabilities configuration.`;
+        } else if (err.message.includes('localStorage')) {
+          errorMessage = `Storage error: ${err.message}. Check browser storage permissions.`;
         } else {
           errorMessage = err.message;
         }
       }
       
+      console.error('Setting error message:', errorMessage);
       setApiError(errorMessage);
     } finally {
+      console.log('=== FINALLY BLOCK EXECUTING ===');
+      console.log('Resetting fetch state...');
       setIsFetchingApi(false);
       setFetchProgress({
         isFetching: false,
@@ -469,9 +643,21 @@ export function Settings() {
         totalBatches: 0,
         documentsFetched: 0
       });
+      console.log('Fetch state reset completed');
       console.log('=== API FETCH END ===');
     }
+    } catch (outerError: any) {
+      console.error('=== OUTER FUNCTION ERROR ===');
+      console.error('Outer error type:', typeof outerError);
+      console.error('Outer error message:', outerError instanceof Error ? outerError.message : String(outerError));
+      console.error('Outer error stack:', outerError instanceof Error ? outerError.stack : 'No stack trace');
+      console.error('Full outer error object:', outerError);
+      setApiError(`Function execution error: ${outerError instanceof Error ? outerError.message : String(outerError)}`);
+    }
   };
+
+  // Test that the function is defined
+  console.log('fetchApiData function defined:', typeof fetchApiData);
 
   // const saveDataLocally = () => {
   //   if (!apiData) {
@@ -575,7 +761,7 @@ export function Settings() {
       console.log('Database upload result:', result);
       setUploadResult(result);
 
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error uploading to database:', err);
       console.error('Error details:', {
         name: err?.name,
@@ -610,7 +796,7 @@ export function Settings() {
       } else {
         throw new Error(`Health check failed: HTTP ${response.status}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Database connectivity test failed:', err);
       setApiError(`Database connection failed: ${err?.message || err}`);
       alert(`Database connection failed: ${err?.message || err}`);
@@ -665,7 +851,7 @@ export function Settings() {
       setUploadResult(result);
       alert('Sample upload successful! Check the result below.');
 
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error in sample upload:', err);
       console.error('Error details:', {
         name: err?.name,
@@ -679,6 +865,93 @@ export function Settings() {
     }
   };
 
+  const testDocumentsApi = async () => {
+    setIsTestingConnectivity(true);
+    setConnectivityTest(null);
+
+    console.log('=== DOCUMENTS API TEST START ===');
+    
+    try {
+      const testUrl = 'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/?limit=1&offset=0';
+      console.log(`Testing documents API: ${testUrl}`);
+      
+      let response;
+      try {
+        // Try Tauri HTTP client first (bypasses CORS)
+        console.log('Trying Tauri HTTP client for test...');
+        response = await tauriFetch(testUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          }
+        });
+        console.log('Tauri HTTP client succeeded for test');
+      } catch (tauriError) {
+        console.log(`Tauri HTTP client failed for test, trying browser fetch... ${tauriError}`);
+        // Fallback to browser fetch
+        response = await fetch(testUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          mode: 'cors',
+          cache: 'no-cache'
+        });
+        console.log('Browser fetch completed for test');
+      }
+
+      console.log(`Documents API response:`, {
+        status: response.status,
+        ok: response.ok,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries())
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Documents API data:', data);
+        
+        // Test the new field processing
+        if (data.data?.documents?.[0]) {
+          const doc = data.data.documents[0];
+          console.log('Testing field processing for document:', {
+            hasPostedDate: !!doc.postedDate,
+            hasCommentEndDate: !!doc.commentEndDate,
+            postedDate: doc.postedDate,
+            commentEndDate: doc.commentEndDate,
+            allFields: Object.keys(doc)
+          });
+          
+          // Test withinCommentPeriod calculation
+          if (doc.commentEndDate) {
+            const endDate = new Date(doc.commentEndDate);
+            const now = new Date();
+            const withinCommentPeriod = now <= endDate;
+            console.log('withinCommentPeriod calculation:', {
+              endDate: endDate.toISOString(),
+              now: now.toISOString(),
+              withinCommentPeriod
+            });
+          }
+        }
+        
+        setConnectivityTest(`Documents API: OK - Retrieved ${data.data?.documents?.length || 0} documents`);
+      } else {
+        const errorText = await response.text();
+        console.error('Documents API error:', errorText);
+        setConnectivityTest(`Documents API: Failed - HTTP ${response.status}: ${errorText}`);
+      }
+    } catch (err) {
+      console.error('Documents API test error:', err);
+      setConnectivityTest(`Documents API: Error - ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+    
+    setIsTestingConnectivity(false);
+    console.log('=== DOCUMENTS API TEST END ===');
+  };
+
   const testConnectivity = async () => {
     setIsTestingConnectivity(true);
     setConnectivityTest(null);
@@ -687,7 +960,7 @@ export function Settings() {
     
     const testUrls = [
       'https://httpbin.org/get',
-      'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/?all=true',
+      'https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/?limit=1&offset=0',
       'http://10.0.4.52:11434/api/tags' // Test Ollama endpoint
     ];
 
@@ -1470,7 +1743,14 @@ export function Settings() {
             <Button
               variant="contained"
               startIcon={<DownloadIcon />}
-              onClick={() => fetchApiData(true)}
+              onClick={() => {
+                console.log('=== FETCH DOCUMENTS BUTTON CLICKED ===');
+                console.log('Button clicked at:', new Date().toISOString());
+                console.log('isFetchingApi state:', isFetchingApi);
+                console.log('About to call fetchApiData(true)');
+                alert('Button clicked! Check console for logs.');
+                fetchApiData(true);
+              }}
               disabled={isFetchingApi}
             >
               {isFetchingApi && fetchProgress.isFetching ? 'Fetching...' : 'Fetch Documents'}
@@ -1482,6 +1762,15 @@ export function Settings() {
               disabled={isTestingConnectivity}
             >
               {isTestingConnectivity ? 'Testing...' : 'Test Connectivity'}
+            </Button>
+            
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={testDocumentsApi}
+              disabled={isTestingConnectivity}
+            >
+              {isTestingConnectivity ? 'Testing...' : 'Test Documents API'}
             </Button>
             
 

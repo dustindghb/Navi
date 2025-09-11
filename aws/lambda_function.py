@@ -154,6 +154,8 @@ def _format_document(data: Dict[str, Any], key: str) -> Dict[str, Any]:
         "webDocketLink": data.get("webDocketLink", ""),
         "webCommentLink": data.get("webCommentLink", ""),
         "embedding": data.get("embedding", []),
+        "postedDate": data.get("postedDate", ""),
+        "commentEndDate": data.get("commentEndDate", ""),
         "s3Key": key,
         "metadata": {
             "hasEmbedding": bool(data.get("embedding")),
