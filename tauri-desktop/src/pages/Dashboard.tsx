@@ -1,6 +1,26 @@
 import { useState, useEffect } from 'react';
-import { CommentDrafting } from '../components/CommentDrafting';
 import { fetchCommentsFromRegulationsGov, deriveDocketId, getDocumentCommentCount } from '../utils/regulationsGovApi';
+import {
+  Card,
+  CardContent,
+  Typography,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  Chip,
+  CircularProgress,
+  Alert,
+  AlertTitle
+} from '@mui/material';
+import {
+  Assessment as AssessmentIcon,
+  Lightbulb as LightbulbIcon,
+  Group as GroupIcon,
+  Assignment as AssignmentIcon,
+  Mood as MoodIcon,
+  FiberManualRecord as FiberManualRecordIcon
+} from '@mui/icons-material';
 
 interface PersonaData {
   id?: number;
@@ -75,6 +95,11 @@ export function Dashboard() {
   const [documentCommentCounts, setDocumentCommentCounts] = useState<{[documentId: string]: number}>({});
   const [isLoadingCommentCounts, setIsLoadingCommentCounts] = useState(false);
   const [enableCommentCounts, setEnableCommentCounts] = useState(true);
+  
+  // Comment analysis state
+  const [commentAnalysis, setCommentAnalysis] = useState<any>(null);
+  const [loadingAnalysis, setLoadingAnalysis] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   
   // GPT reasoning state
   const [isGeneratingReasoning, setIsGeneratingReasoning] = useState(false);
@@ -907,19 +932,44 @@ Reasoning: [Your explanation focusing on potential impacts and ripple effects]`;
 
     setSelectedDocumentForComments({ id: documentId, title: documentTitle, docket_id: effectiveDocketId });
     setLoadingComments(true);
+    setLoadingAnalysis(true);
     setShowComments(true);
     setDocumentComments([]);
-    setError(null); // Clear any previous errors
+    setCommentAnalysis(null);
+    setError(null);
+    setAnalysisError(null);
 
     try {
-      const comments = await fetchCommentsFromRegulationsGov(effectiveDocketId, documentId);
-      setDocumentComments(comments);
+      // Fetch comments and analysis in parallel
+      const [comments, analysisResult] = await Promise.allSettled([
+        fetchCommentsFromRegulationsGov(effectiveDocketId, documentId),
+        fetchCommentAnalysis(documentId, documentTitle)
+      ]);
+
+      // Handle comments result
+      if (comments.status === 'fulfilled') {
+        setDocumentComments(comments.value);
+      } else {
+        console.error('Error loading comments:', comments.reason);
+        const errorMessage = comments.reason instanceof Error ? comments.reason.message : 'Failed to load comments from regulations.gov';
+        setError(errorMessage);
+      }
+
+      // Handle analysis result
+      if (analysisResult.status === 'fulfilled') {
+        setCommentAnalysis(analysisResult.value);
+      } else {
+        console.error('Error loading analysis:', analysisResult.reason);
+        const errorMessage = analysisResult.reason instanceof Error ? analysisResult.reason.message : 'Failed to load comment analysis';
+        setAnalysisError(errorMessage);
+      }
+
     } catch (error) {
-      console.error('Error loading comments:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to load comments from regulations.gov';
-      setError(errorMessage);
+      console.error('Error in handleViewComments:', error);
+      setError('An unexpected error occurred while loading comments and analysis.');
     } finally {
       setLoadingComments(false);
+      setLoadingAnalysis(false);
     }
   };
 
@@ -927,6 +977,158 @@ Reasoning: [Your explanation focusing on potential impacts and ripple effects]`;
     setShowComments(false);
     setSelectedDocumentForComments(null);
     setDocumentComments([]);
+    setCommentAnalysis(null);
+    setAnalysisError(null);
+  };
+
+  // Function to fetch comment analysis using GPT model directly (like getGPTReasoning)
+  const fetchCommentAnalysis = async (documentId: string, documentTitle: string) => {
+    try {
+      // Get GPT configuration from localStorage (same as getGPTReasoning)
+      const gptHost = localStorage.getItem('gptHost') || '10.0.4.52';
+      const gptPort = localStorage.getItem('gptPort') || '11434';
+      const gptModel = localStorage.getItem('gptModel') || 'gpt-oss:20b';
+      
+      const url = `http://${gptHost}:${gptPort}/api/generate`;
+      
+      // First, get the comments from regulations.gov
+      const comments = await fetchCommentsFromRegulationsGov(deriveDocketId(documentId) || '', documentId);
+      
+      if (!comments || comments.length === 0) {
+        return {
+          summary: "No comments found for this document.",
+          key_insights: [],
+          common_perspectives: [],
+          regulatory_themes: [],
+          sentiment_analysis: {
+            overall_sentiment: "unknown",
+            confidence: 0.0,
+            details: "No comments available for analysis"
+          },
+          total_comments_analyzed: 0,
+          confidence_score: 0.0
+        };
+      }
+      
+      // Prepare comment text for analysis
+      const commentTexts = comments.map((comment, index) => {
+        const text = comment.attributes?.comment || comment.attributes?.commentText || '';
+        const submitter = comment.attributes?.submitterName || comment.attributes?.organizationName || 'Anonymous';
+        return `Comment ${index + 1} (${submitter}): ${text}`;
+      }).join('\n\n');
+      
+      const prompt = `You are an AI assistant specialized in analyzing regulatory comments. Analyze the following public comments on a regulatory document and provide insights.
+
+DOCUMENT INFORMATION:
+- Document ID: ${documentId}
+- Title: ${documentTitle}
+- Total Comments: ${comments.length}
+
+COMMENTS TO ANALYZE:
+${commentTexts}
+
+TASK: Analyze these comments and provide a comprehensive analysis including:
+1. Key insights and main themes
+2. Common perspectives and concerns
+3. Regulatory themes (compliance, economic, environmental, safety, etc.)
+4. Overall sentiment analysis
+5. Stakeholder concerns and recommendations
+
+RESPONSE FORMAT: Provide your analysis in the following JSON format:
+
+{
+  "summary": "Executive summary of the comment analysis",
+  "key_insights": [
+    "Key insight 1",
+    "Key insight 2",
+    "Key insight 3"
+  ],
+  "common_perspectives": [
+    "Common perspective 1",
+    "Common perspective 2"
+  ],
+  "regulatory_themes": [
+    {
+      "theme": "compliance_burden",
+      "description": "Description of the theme",
+      "frequency": "high/medium/low"
+    }
+  ],
+  "sentiment_analysis": {
+    "overall_sentiment": "positive/negative/mixed",
+    "confidence": 0.85,
+    "details": "Detailed sentiment analysis"
+  },
+  "total_comments_analyzed": ${comments.length},
+  "confidence_score": 0.8
+}
+
+Focus on providing actionable insights and clear categorization of the comments.`;
+
+      const payload = {
+        model: gptModel,
+        prompt: prompt,
+        stream: false,
+        reasoning_level: "high",
+        options: {
+          temperature: 0.3,
+          top_p: 0.8,
+          max_tokens: 4000
+        }
+      };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        if (response.status === 0 || response.status >= 500) {
+          throw new Error(`Cannot connect to GPT model at ${url}. Please check if the model is running.`);
+        }
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json();
+      const responseText = result.response || '';
+      
+      // Try to parse JSON from the response
+      let analysis;
+      try {
+        // Look for JSON in the response
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          analysis = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error('No JSON found in response');
+        }
+      } catch (parseError) {
+        // Fallback: create a basic analysis structure
+        analysis = {
+          summary: responseText.substring(0, 500) + (responseText.length > 500 ? '...' : ''),
+          key_insights: ["Analysis completed but response format was not JSON"],
+          common_perspectives: ["Response parsing required manual review"],
+          regulatory_themes: [],
+          sentiment_analysis: {
+            overall_sentiment: "unknown",
+            confidence: 0.5,
+            details: "Response format was not JSON"
+          },
+          total_comments_analyzed: comments.length,
+          confidence_score: 0.5
+        };
+      }
+      
+      return analysis;
+      
+    } catch (error) {
+      console.error('Error fetching comment analysis:', error);
+      throw error;
+    }
   };
 
   // Comment drafting functions
@@ -940,9 +1142,6 @@ Reasoning: [Your explanation focusing on potential impacts and ripple effects]`;
     setSelectedDocument(null);
   };
 
-  const handleCommentSubmitted = (_commentId: string) => {
-    // Comment submitted successfully
-  };
 
   return (
     <div style={{ 
@@ -1203,36 +1402,53 @@ Reasoning: [Your explanation focusing on potential impacts and ripple effects]`;
                       {match.document.title}
                     </h4>
                     
-                    {/* Comment Count Badge */}
-                    {documentCommentCounts[match.document.document_id] !== undefined ? (
-                      <div style={{
-                        display: 'inline-block',
-                        background: documentCommentCounts[match.document.document_id] > 0 ? '#3C362A' : '#2A2A2A',
-                        color: documentCommentCounts[match.document.document_id] > 0 ? '#FAFAFA' : '#666',
-                        padding: '2px 8px',
-                        borderRadius: 4,
-                        fontSize: '11px',
-                        fontWeight: 500,
-                        marginBottom: 8,
-                        border: documentCommentCounts[match.document.document_id] > 0 ? '1px solid #5D4E37' : '1px solid #333'
-                      }}>
-                        {documentCommentCounts[match.document.document_id]} comment{documentCommentCounts[match.document.document_id] !== 1 ? 's' : ''}
-                      </div>
-                    ) : isLoadingCommentCounts ? (
-                      <div style={{
-                        display: 'inline-block',
-                        background: '#2A2A2A',
-                        color: '#666',
-                        padding: '2px 8px',
-                        borderRadius: 4,
-                        fontSize: '11px',
-                        fontWeight: 500,
-                        marginBottom: 8,
-                        border: '1px solid #333'
-                      }}>
-                        Loading...
-                      </div>
-                    ) : null}
+                    {/* Document Type and Comment Count Badges */}
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                      {/* Document Type Badge */}
+                      {match.document.document_type && (
+                        <div style={{
+                          display: 'inline-block',
+                          background: '#2A4A2A',
+                          color: '#FAFAFA',
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          fontSize: '11px',
+                          fontWeight: 500,
+                          border: '1px solid #3A5A3A'
+                        }}>
+                          {match.document.document_type}
+                        </div>
+                      )}
+                      
+                      {/* Comment Count Badge */}
+                      {documentCommentCounts[match.document.document_id] !== undefined ? (
+                        <div style={{
+                          display: 'inline-block',
+                          background: documentCommentCounts[match.document.document_id] > 0 ? '#3C362A' : '#2A2A2A',
+                          color: documentCommentCounts[match.document.document_id] > 0 ? '#FAFAFA' : '#666',
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          fontSize: '11px',
+                          fontWeight: 500,
+                          border: documentCommentCounts[match.document.document_id] > 0 ? '1px solid #5D4E37' : '1px solid #333'
+                        }}>
+                          {documentCommentCounts[match.document.document_id]} comment{documentCommentCounts[match.document.document_id] !== 1 ? 's' : ''}
+                        </div>
+                      ) : isLoadingCommentCounts ? (
+                        <div style={{
+                          display: 'inline-block',
+                          background: '#2A2A2A',
+                          color: '#666',
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          fontSize: '11px',
+                          fontWeight: 500,
+                          border: '1px solid #333'
+                        }}>
+                          Loading...
+                        </div>
+                      ) : null}
+                    </div>
                     
                     {match.gptReasoning?.shortSummary && (
                       <p style={{ 
@@ -1353,17 +1569,72 @@ Reasoning: [Your explanation focusing on potential impacts and ripple effects]`;
       </div>
       
       {/* Comment Drafting Modal */}
-      {showCommentDrafting && selectedDocument && persona && (
-        <CommentDrafting
-          documentId={selectedDocument.id}
-          documentTitle={selectedDocument.title}
-          personaId={persona.name || 'default'}
-          onClose={handleCloseCommentDrafting}
-          onCommentSubmitted={handleCommentSubmitted}
-        />
+      {showCommentDrafting && selectedDocument && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: '#1A1A1A',
+            border: '1px solid #333',
+            borderRadius: 12,
+            padding: 24,
+            minWidth: 400,
+            maxWidth: 600,
+            maxHeight: '80vh',
+            overflow: 'auto',
+            position: 'relative'
+          }}>
+            {/* Close Button */}
+            <button
+              onClick={handleCloseCommentDrafting}
+              style={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                background: 'transparent',
+                border: 'none',
+                color: '#B8B8B8',
+                fontSize: '20px',
+                cursor: 'pointer',
+                padding: 4,
+                borderRadius: 4
+              }}
+            >
+              ×
+            </button>
+            
+            {/* Blank Content */}
+            <div style={{ paddingTop: 20 }}>
+              <h3 style={{ 
+                margin: '0 0 16px 0', 
+                fontSize: '18px', 
+                fontWeight: 600,
+                color: '#FAFAFA'
+              }}>
+                {selectedDocument.title}
+              </h3>
+              <p style={{ 
+                color: '#B8B8B8', 
+                fontSize: '14px',
+                margin: 0
+              }}>
+                Document ID: {selectedDocument.id}
+              </p>
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* Comments Viewing Modal */}
+      {/* Comments Viewing Modal with Split View */}
       {showComments && selectedDocumentForComments && (
         <div style={{
           position: 'fixed',
@@ -1383,8 +1654,8 @@ Reasoning: [Your explanation focusing on potential impacts and ripple effects]`;
             border: '1px solid #333',
             borderRadius: 12,
             width: '100%',
-            maxWidth: '800px',
-            height: '80vh',
+            maxWidth: '1400px',
+            height: '85vh',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden'
@@ -1400,7 +1671,7 @@ Reasoning: [Your explanation focusing on potential impacts and ripple effects]`;
             }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 600 }}>
-                  Public Comments
+                  Public Comments & Analysis
                 </h2>
                 <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: '#B8B8B8' }}>
                   {selectedDocumentForComments.title}
@@ -1421,60 +1692,280 @@ Reasoning: [Your explanation focusing on potential impacts and ripple effects]`;
               </button>
             </div>
 
-            {/* Content */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
-              {loadingComments ? (
-                <div style={{ textAlign: 'center', color: '#B8B8B8', fontSize: '14px' }}>
-                  Loading comments from regulations.gov...
+            {/* Split Content */}
+            <div style={{ 
+              flex: 1, 
+              display: 'flex', 
+              overflow: 'hidden',
+              borderTop: '1px solid #333'
+            }}>
+              {/* Left Side - Comments */}
+              <div style={{ 
+                flex: 1, 
+                borderRight: '1px solid #333',
+                display: 'flex',
+                flexDirection: 'column'
+              }}>
+                <div style={{
+                  padding: '16px 20px',
+                  borderBottom: '1px solid #333',
+                  background: '#222',
+                  fontSize: '16px',
+                  fontWeight: 600,
+                  color: '#FAFAFA'
+                }}>
+                  Comments ({documentComments.length})
                 </div>
-              ) : documentComments.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  {documentComments.map((comment, index) => (
-                    <div key={index} style={{
-                      background: '#2A2A2A',
-                      border: '1px solid #444',
-                      borderRadius: 8,
-                      padding: 16
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <span style={{ fontSize: '12px', color: '#4CAF50', fontWeight: 600 }}>
-                          Comment #{index + 1}
-                        </span>
-                        {(comment.attributes?.postedDate || comment.attributes?.datePosted) && (
-                          <span style={{ fontSize: '12px', color: '#666' }}>
-                            {new Date(comment.attributes.postedDate || comment.attributes.datePosted).toLocaleDateString()}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: '14px', color: '#FAFAFA', lineHeight: '1.5' }}>
-                        {comment.attributes?.comment || comment.attributes?.commentText || 'No comment text available'}
-                      </div>
-                      {(comment.attributes?.submitterName || comment.attributes?.organizationName) && (
-                        <div style={{ fontSize: '12px', color: '#B8B8B8', marginTop: 8, fontStyle: 'italic' }}>
-                          — {comment.attributes.submitterName || comment.attributes.organizationName}
+                <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+                  {loadingComments ? (
+                    <div style={{ textAlign: 'center', color: '#B8B8B8', fontSize: '14px' }}>
+                      Loading comments from regulations.gov...
+                    </div>
+                  ) : documentComments.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      {documentComments.map((comment, index) => (
+                        <div key={index} style={{
+                          background: '#2A2A2A',
+                          border: '1px solid #444',
+                          borderRadius: 8,
+                          padding: 16
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <span style={{ fontSize: '12px', color: '#4CAF50', fontWeight: 600 }}>
+                              Comment #{index + 1}
+                            </span>
+                            {(comment.attributes?.postedDate || comment.attributes?.datePosted) && (
+                              <span style={{ fontSize: '12px', color: '#666' }}>
+                                {new Date(comment.attributes.postedDate || comment.attributes.datePosted).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '14px', color: '#FAFAFA', lineHeight: '1.5' }}>
+                            {comment.attributes?.comment || comment.attributes?.commentText || 'No comment text available'}
+                          </div>
+                          {(comment.attributes?.submitterName || comment.attributes?.organizationName) && (
+                            <div style={{ fontSize: '12px', color: '#B8B8B8', marginTop: 8, fontStyle: 'italic' }}>
+                              — {comment.attributes.submitterName || comment.attributes.organizationName}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {documentComments.length === 30 && (
+                        <div style={{
+                          background: '#3C362A',
+                          border: '1px solid #5D4E37',
+                          borderRadius: 8,
+                          padding: 12,
+                          textAlign: 'center',
+                          fontSize: '12px',
+                          color: '#B8B8B8'
+                        }}>
+                          Showing 30 most recent comments. This document may have more comments available.
                         </div>
                       )}
                     </div>
-                  ))}
-                  {documentComments.length === 30 && (
-                    <div style={{
-                      background: '#3C362A',
-                      border: '1px solid #5D4E37',
-                      borderRadius: 8,
-                      padding: 12,
-                      textAlign: 'center',
-                      fontSize: '12px',
-                      color: '#B8B8B8'
-                    }}>
-                      Showing 30 most recent comments. This document may have more comments available.
+                  ) : (
+                    <div style={{ textAlign: 'center', color: '#B8B8B8', fontSize: '14px' }}>
+                      No public comments found for this document.
                     </div>
                   )}
                 </div>
-              ) : (
-                <div style={{ textAlign: 'center', color: '#B8B8B8', fontSize: '14px' }}>
-                  No public comments found for this document.
+              </div>
+
+              {/* Right Side - Analysis */}
+              <div style={{ 
+                flex: 1, 
+                display: 'flex',
+                flexDirection: 'column'
+              }}>
+                <div style={{
+                  padding: '16px 20px',
+                  borderBottom: '1px solid #333',
+                  background: '#222',
+                  fontSize: '16px',
+                  fontWeight: 600,
+                  color: '#FAFAFA'
+                }}>
+                  AI Analysis
                 </div>
-              )}
+                <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+                  {loadingAnalysis ? (
+                    <div style={{ textAlign: 'center', color: '#B8B8B8', fontSize: '14px' }}>
+                      <CircularProgress size={24} style={{ marginBottom: 16, color: '#4CAF50' }} />
+                      <div style={{ marginBottom: 16 }}>Analyzing comments with AI...</div>
+                      <div style={{ fontSize: '12px', color: '#666' }}>
+                        This may take a moment while we process the comments
+                      </div>
+                    </div>
+                  ) : analysisError ? (
+                    <Alert severity="error" style={{ marginBottom: 16 }}>
+                      <AlertTitle>Analysis Error</AlertTitle>
+                      {analysisError}
+                    </Alert>
+                  ) : commentAnalysis ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                      {/* Executive Summary */}
+                      {commentAnalysis.summary && (
+                        <Card style={{ background: '#2A2A2A', border: '1px solid #444' }}>
+                          <CardContent>
+                            <Typography variant="h6" style={{ marginBottom: 12, color: '#4CAF50', display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <AssessmentIcon fontSize="small" />
+                              Executive Summary
+                            </Typography>
+                            <Typography variant="body2" style={{ color: '#FAFAFA', lineHeight: '1.5' }}>
+                              {commentAnalysis.summary}
+                            </Typography>
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {/* Key Insights */}
+                      {commentAnalysis.key_insights && commentAnalysis.key_insights.length > 0 && (
+                        <Card style={{ background: '#2A2A2A', border: '1px solid #444' }}>
+                          <CardContent>
+                            <Typography variant="h6" style={{ marginBottom: 12, color: '#4CAF50', display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <LightbulbIcon fontSize="small" />
+                              Key Insights
+                            </Typography>
+                            <List dense>
+                              {commentAnalysis.key_insights.map((insight: string, index: number) => (
+                                <ListItem key={index} style={{ paddingLeft: 0 }}>
+                                  <ListItemIcon>
+                                    <FiberManualRecordIcon style={{ fontSize: 8, color: '#4CAF50' }} />
+                                  </ListItemIcon>
+                                  <ListItemText 
+                                    primary={insight}
+                                    primaryTypographyProps={{ style: { color: '#FAFAFA', fontSize: '14px' } }}
+                                  />
+                                </ListItem>
+                              ))}
+                            </List>
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {/* Common Perspectives */}
+                      {commentAnalysis.common_perspectives && commentAnalysis.common_perspectives.length > 0 && (
+                        <Card style={{ background: '#2A2A2A', border: '1px solid #444' }}>
+                          <CardContent>
+                            <Typography variant="h6" style={{ marginBottom: 12, color: '#4CAF50', display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <GroupIcon fontSize="small" />
+                              Common Perspectives
+                            </Typography>
+                            <List dense>
+                              {commentAnalysis.common_perspectives.map((perspective: string, index: number) => (
+                                <ListItem key={index} style={{ paddingLeft: 0 }}>
+                                  <ListItemIcon>
+                                    <FiberManualRecordIcon style={{ fontSize: 8, color: '#4CAF50' }} />
+                                  </ListItemIcon>
+                                  <ListItemText 
+                                    primary={perspective}
+                                    primaryTypographyProps={{ style: { color: '#FAFAFA', fontSize: '14px' } }}
+                                  />
+                                </ListItem>
+                              ))}
+                            </List>
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {/* Regulatory Themes */}
+                      {commentAnalysis.regulatory_themes && commentAnalysis.regulatory_themes.length > 0 && (
+                        <Card style={{ background: '#2A2A2A', border: '1px solid #444' }}>
+                          <CardContent>
+                            <Typography variant="h6" style={{ marginBottom: 12, color: '#4CAF50', display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <AssignmentIcon fontSize="small" />
+                              Regulatory Themes
+                            </Typography>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              {commentAnalysis.regulatory_themes.map((theme: any, index: number) => (
+                                <div
+                                  key={index}
+                                  style={{
+                                    background: '#333',
+                                    color: '#FAFAFA',
+                                    borderRadius: 16,
+                                    padding: '8px 12px',
+                                    border: '1px solid #555'
+                                  }}
+                                >
+                                  <div style={{ fontWeight: 600, marginBottom: 2 }}>
+                                    {theme.theme?.replace(/_/g, ' ').toUpperCase() || 'Unknown Theme'}
+                                  </div>
+                                  <div style={{ fontSize: '11px', opacity: 0.8 }}>
+                                    {theme.description || 'No description available'}
+                                  </div>
+                                  {theme.frequency && (
+                                    <div style={{ fontSize: '11px', color: '#4CAF50', marginTop: 2 }}>
+                                      Frequency: {theme.frequency}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {/* Sentiment Analysis */}
+                      {commentAnalysis.sentiment_analysis && (
+                        <Card style={{ background: '#2A2A2A', border: '1px solid #444' }}>
+                          <CardContent>
+                            <Typography variant="h6" style={{ marginBottom: 12, color: '#4CAF50', display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <MoodIcon fontSize="small" />
+                              Sentiment Analysis
+                            </Typography>
+                            <div style={{ fontSize: '14px', color: '#FAFAFA', lineHeight: '1.5' }}>
+                              <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <Typography variant="body2" style={{ color: '#FAFAFA' }}>
+                                  <strong>Overall Sentiment:</strong>
+                                </Typography>
+                                <Chip 
+                                  label={commentAnalysis.sentiment_analysis.overall_sentiment || 'Unknown'}
+                                  size="small"
+                                  style={{ 
+                                    background: commentAnalysis.sentiment_analysis.overall_sentiment === 'positive' ? '#4CAF50' : 
+                                               commentAnalysis.sentiment_analysis.overall_sentiment === 'negative' ? '#F44336' : '#FF9800',
+                                    color: 'white'
+                                  }}
+                                />
+                              </div>
+                              <div style={{ marginBottom: 8 }}>
+                                <Typography variant="body2" style={{ color: '#FAFAFA' }}>
+                                  <strong>Confidence:</strong> {((commentAnalysis.sentiment_analysis.confidence || 0) * 100).toFixed(1)}%
+                                </Typography>
+                              </div>
+                              {commentAnalysis.sentiment_analysis.details && (
+                                <Typography variant="body2" style={{ color: '#B8B8B8', fontSize: '13px' }}>
+                                  {commentAnalysis.sentiment_analysis.details}
+                                </Typography>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {/* Analysis Metadata */}
+                      <Card style={{ background: '#333', border: '1px solid #555' }}>
+                        <CardContent style={{ padding: 12 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Typography variant="caption" style={{ color: '#B8B8B8' }}>
+                              <strong>Comments Analyzed:</strong> {commentAnalysis.total_comments_analyzed || 0}
+                            </Typography>
+                            <Typography variant="caption" style={{ color: '#B8B8B8' }}>
+                              <strong>Analysis Confidence:</strong> {((commentAnalysis.confidence_score || 0) * 100).toFixed(1)}%
+                            </Typography>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', color: '#B8B8B8', fontSize: '14px' }}>
+                      No analysis available. Analysis will appear here once comments are loaded.
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
