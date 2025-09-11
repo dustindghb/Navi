@@ -81,6 +81,13 @@ export function Dashboard() {
     loadData();
   }, []);
 
+  // Load saved matches when persona changes
+  useEffect(() => {
+    if (persona?.id) {
+      loadSavedMatches();
+    }
+  }, [persona?.id]);
+
 
   // Utility function to prepare persona data for embedding
   const preparePersonaForEmbedding = (persona: PersonaData): string => {
@@ -253,6 +260,91 @@ export function Dashboard() {
     }
   };
 
+  const loadSavedMatches = async () => {
+    if (!persona?.id) return;
+    
+    try {
+      const response = await fetch(`http://localhost:8001/matched-documents?persona_id=${persona.id}`);
+      if (response.ok) {
+        const savedMatches = await response.json();
+        
+        // Convert saved matches to the format expected by the component
+        const convertedMatches: MatchedDocument[] = savedMatches.map((savedMatch: any) => ({
+          document: savedMatch.document,
+          similarityScore: savedMatch.similarity_score,
+          relevanceReason: savedMatch.relevance_reason,
+          gptReasoning: {
+            relevanceScore: savedMatch.gpt_relevance_score,
+            reasoning: savedMatch.gpt_reasoning,
+            thoughtProcess: savedMatch.gpt_thought_process
+          }
+        }));
+        
+        setMatchedDocuments(convertedMatches);
+      }
+    } catch (err) {
+      console.error('Error loading saved matches:', err);
+    }
+  };
+
+  const saveMatchesToDatabase = async (matches: MatchedDocument[]) => {
+    if (!persona?.id || matches.length === 0) return;
+    
+    try {
+      const matchesToSave = matches.map(match => ({
+        document_id: match.document.document_id,
+        similarity_score: match.similarityScore,
+        gpt_relevance_score: match.gptReasoning?.relevanceScore || 0,
+        relevance_reason: match.relevanceReason || '',
+        gpt_reasoning: match.gptReasoning?.reasoning || '',
+        gpt_thought_process: match.gptReasoning?.thoughtProcess || ''
+      }));
+      
+      const response = await fetch('http://localhost:8001/matched-documents', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          persona_id: persona.id,
+          matched_documents: matchesToSave
+        })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log(`Saved ${result.saved_count} matched documents to database`);
+      }
+    } catch (err) {
+      console.error('Error saving matches to database:', err);
+    }
+  };
+
+  const clearSavedMatches = async () => {
+    if (!persona?.id) return;
+    
+    try {
+      // Clear matches from database by saving an empty array
+      const response = await fetch('http://localhost:8001/matched-documents', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          persona_id: persona.id,
+          matched_documents: []
+        })
+      });
+      
+      if (response.ok) {
+        setMatchedDocuments([]);
+        console.log('Cleared saved matches from database');
+      }
+    } catch (err) {
+      console.error('Error clearing saved matches:', err);
+    }
+  };
+
   const findMatches = async () => {
     if (!persona || !persona.embedding || documents.length === 0) {
       setError('Missing persona embedding or documents. Please ensure persona has been embedded and documents are loaded.');
@@ -366,6 +458,11 @@ export function Dashboard() {
       });
       
       setMatchedDocuments(finalMatches);
+
+      // Save matches to database
+      if (finalMatches.length > 0) {
+        await saveMatchesToDatabase(finalMatches);
+      }
 
       if (finalMatches.length === 0) {
         setError(`No documents found above GPT threshold of ${gptThreshold}/10 after semantic filtering`);
@@ -622,6 +719,21 @@ END_THOUGHT_PROCESS:`;
                 <span style={{ fontSize: '14px', color: '#B8B8B8' }}>
                   Matches: {matchedDocuments.length} found
                 </span>
+                <button
+                  onClick={clearSavedMatches}
+                  style={{
+                    background: '#6B2C2C',
+                    color: '#FAFAFA',
+                    border: '1px solid #444',
+                    borderRadius: 4,
+                    padding: '4px 8px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    marginLeft: 8
+                  }}
+                >
+                  Clear Saved
+                </button>
               </div>
             )}
           </div>

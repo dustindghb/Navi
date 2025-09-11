@@ -4,10 +4,11 @@ import { CssBaseline } from '@mui/material';
 import { Dashboard } from './pages/Dashboard';
 import { Persona } from './pages/Persona';
 import { Settings } from './pages/Settings';
+import { CommentDraft } from './pages/CommentDraft';
 import { appTheme } from './theme';
 import './App.css';
 
-type ViewKey = 'dashboard' | 'persona' | 'settings';
+type ViewKey = 'dashboard' | 'persona' | 'settings' | 'comment-draft';
 
 export function App() {
   const [view, setView] = useState<ViewKey>('dashboard');
@@ -24,12 +25,14 @@ export function App() {
           <nav style={{ paddingTop: 10 }}>
             <button onClick={() => setView('dashboard')} style={navStyle(view === 'dashboard')}>Dashboard</button>
             <button onClick={() => setView('persona')} style={navStyle(view === 'persona')}>Profile</button>
+            <button onClick={() => setView('comment-draft')} style={navStyle(view === 'comment-draft')}>Comment Draft</button>
             <button onClick={() => setView('settings')} style={navStyle(view === 'settings')}>Settings</button>
           </nav>
         </aside>
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           {view === 'dashboard' && <Dashboard />}
           {view === 'persona' && <Persona />}
+          {view === 'comment-draft' && <CommentDraft />}
           {view === 'settings' && <Settings />}
         </main>
       </div>

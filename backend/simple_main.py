@@ -90,6 +90,23 @@ def init_db():
         )
     """)
     
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS matched_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            persona_id INTEGER NOT NULL,
+            document_id TEXT NOT NULL,
+            similarity_score REAL NOT NULL,
+            gpt_relevance_score INTEGER NOT NULL,
+            relevance_reason TEXT,
+            gpt_reasoning TEXT,
+            gpt_thought_process TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (persona_id) REFERENCES personas (id),
+            FOREIGN KEY (document_id) REFERENCES documents (document_id),
+            UNIQUE(persona_id, document_id)
+        )
+    """)
+    
     # Add comment_end_date column if it doesn't exist (migration)
     try:
         cursor.execute("ALTER TABLE documents ADD COLUMN comment_end_date TIMESTAMP")
@@ -161,6 +178,9 @@ class APIHandler(BaseHTTPRequestHandler):
         elif path.startswith('/comments/'):
             comment_id = int(path.split('/')[-1])
             self.get_comment(comment_id)
+            
+        elif path == '/matched-documents':
+            self.get_matched_documents(query_params)
             
         else:
             self.send_response(404)
@@ -236,6 +256,9 @@ class APIHandler(BaseHTTPRequestHandler):
             
         elif path == '/documents/embedding':
             self.update_document_embedding(data)
+            
+        elif path == '/matched-documents':
+            self.save_matched_documents(data)
             
         else:
             self.send_response(404)
@@ -963,6 +986,147 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(json.dumps({"error": "Document not found"}).encode())
+    
+    def save_matched_documents(self, data):
+        """Save matched documents that passed semantic and GPT thresholds"""
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        persona_id = data.get('persona_id')
+        matched_documents = data.get('matched_documents', [])
+        
+        if not persona_id:
+            conn.close()
+            self.send_response(400)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "persona_id is required"}).encode())
+            return
+        
+        # Clear existing matches for this persona
+        cursor.execute("DELETE FROM matched_documents WHERE persona_id = ?", (persona_id,))
+        
+        saved_count = 0
+        errors = []
+        
+        for match in matched_documents:
+            try:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO matched_documents 
+                    (persona_id, document_id, similarity_score, gpt_relevance_score, 
+                     relevance_reason, gpt_reasoning, gpt_thought_process)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    persona_id,
+                    match.get('document_id'),
+                    match.get('similarity_score', 0.0),
+                    match.get('gpt_relevance_score', 0),
+                    match.get('relevance_reason', ''),
+                    match.get('gpt_reasoning', ''),
+                    match.get('gpt_thought_process', '')
+                ))
+                saved_count += 1
+            except Exception as e:
+                errors.append(f"Error saving match for document {match.get('document_id', 'unknown')}: {str(e)}")
+        
+        conn.commit()
+        conn.close()
+        
+        result = {
+            'success': True,
+            'persona_id': persona_id,
+            'saved_count': saved_count,
+            'total_matches': len(matched_documents),
+            'errors': errors,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps(result).encode())
+    
+    def get_matched_documents(self, query_params):
+        """Get matched documents for a persona"""
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        persona_id = query_params.get('persona_id', [None])[0]
+        
+        if not persona_id:
+            conn.close()
+            self.send_response(400)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "persona_id is required"}).encode())
+            return
+        
+        # Get matched documents with full document details
+        cursor.execute("""
+            SELECT 
+                md.id,
+                md.persona_id,
+                md.document_id,
+                md.similarity_score,
+                md.gpt_relevance_score,
+                md.relevance_reason,
+                md.gpt_reasoning,
+                md.gpt_thought_process,
+                md.created_at,
+                d.title,
+                d.text,
+                d.agency_id,
+                d.document_type,
+                d.web_comment_link,
+                d.web_document_link,
+                d.web_docket_link,
+                d.docket_id,
+                d.posted_date,
+                d.comment_end_date
+            FROM matched_documents md
+            JOIN documents d ON md.document_id = d.document_id
+            WHERE md.persona_id = ?
+            ORDER BY md.gpt_relevance_score DESC, md.similarity_score DESC
+        """, (persona_id,))
+        
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                'id': row[0],
+                'persona_id': row[1],
+                'document_id': row[2],
+                'similarity_score': row[3],
+                'gpt_relevance_score': row[4],
+                'relevance_reason': row[5],
+                'gpt_reasoning': row[6],
+                'gpt_thought_process': row[7],
+                'created_at': row[8],
+                'document': {
+                    'id': row[2],  # document_id
+                    'document_id': row[2],
+                    'title': row[9],
+                    'text': row[10],
+                    'agency_id': row[11],
+                    'document_type': row[12],
+                    'web_comment_link': row[13],
+                    'web_document_link': row[14],
+                    'web_docket_link': row[15],
+                    'docket_id': row[16],
+                    'posted_date': row[17],
+                    'comment_end_date': row[18]
+                }
+            })
+        
+        conn.close()
+        
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps(results).encode())
 
 def run_server(port=8001):
     """Run the HTTP server"""
