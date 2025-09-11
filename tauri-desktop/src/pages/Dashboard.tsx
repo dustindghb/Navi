@@ -54,12 +54,7 @@ export function Dashboard() {
   const [matchedDocuments, setMatchedDocuments] = useState<MatchedDocument[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
-  const [showLogs, setShowLogs] = useState(false);
   
-  // Persona embedding state
-  const [isGeneratingEmbedding, setIsGeneratingEmbedding] = useState(false);
-  const [embeddingError, setEmbeddingError] = useState<string | null>(null);
   
   // Document embedding state
   const [isEmbeddingDocuments, setIsEmbeddingDocuments] = useState(false);
@@ -76,19 +71,16 @@ export function Dashboard() {
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   
   // Semantic matching threshold
-  const [semanticThreshold, setSemanticThreshold] = useState(5.0);
+  const semanticThreshold = 5.2;
+  // GPT reasoning threshold
+  const gptThreshold = 5.0;
+  
 
   // Load data on component mount
   useEffect(() => {
     loadData();
   }, []);
 
-  const addLog = (message: string) => {
-    const timestamp = new Date().toLocaleTimeString();
-    const logMessage = `[${timestamp}] ${message}`;
-    console.log(logMessage);
-    setConsoleLogs(prev => [...prev.slice(-49), logMessage]); // Keep last 50 logs
-  };
 
   // Utility function to prepare persona data for embedding
   const preparePersonaForEmbedding = (persona: PersonaData): string => {
@@ -130,102 +122,6 @@ export function Dashboard() {
     return personaDescription;
   };
 
-  // Function to generate persona embedding using remote model
-  const generatePersonaEmbedding = async (persona: PersonaData): Promise<number[]> => {
-    const personaText = preparePersonaForEmbedding(persona);
-    
-    if (!personaText.trim()) {
-      throw new Error('No persona data available for embedding');
-    }
-    
-    // Get remote embedding configuration from localStorage
-    const remoteEmbeddingHost = localStorage.getItem('remoteEmbeddingHost') || '10.0.4.52';
-    const remoteEmbeddingPort = localStorage.getItem('remoteEmbeddingPort') || '11434';
-    const remoteEmbeddingModel = localStorage.getItem('remoteEmbeddingModel') || 'nomic-embed-text:latest';
-    
-    const url = `http://${remoteEmbeddingHost}:${remoteEmbeddingPort}/api/embeddings`;
-      const payload = {
-      model: remoteEmbeddingModel,
-      prompt: personaText
-      };
-
-    addLog('=== GENERATING PERSONA EMBEDDING ===');
-    addLog(`Persona text: ${personaText.substring(0, 200)}...`);
-      addLog(`URL: ${url}`);
-    addLog(`Model: ${remoteEmbeddingModel}`);
-
-    const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
-
-    const result = await response.json();
-    
-    if (!result.embedding || !Array.isArray(result.embedding)) {
-      throw new Error('Invalid embedding response format');
-    }
-
-    addLog(`Generated embedding with ${result.embedding.length} dimensions`);
-    return result.embedding;
-  };
-
-  // Function to generate and store persona embedding
-  const generateAndStorePersonaEmbedding = async () => {
-    if (!persona) {
-      setEmbeddingError('No persona found. Please configure your persona first.');
-      return;
-    }
-
-    setIsGeneratingEmbedding(true);
-    setEmbeddingError(null);
-    addLog('=== GENERATING PERSONA EMBEDDING ===');
-
-    try {
-      // Generate the embedding
-      const embedding = await generatePersonaEmbedding(persona);
-      
-      // Store the embedding in the database
-      const embeddingResponse = await fetch('http://localhost:8001/personas/embedding', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          persona_id: persona.id,
-          embedding: embedding
-        })
-      });
-      
-      if (embeddingResponse.ok) {
-        const embeddingResult = await embeddingResponse.json();
-        addLog(`Successfully stored persona embedding in database: ${embeddingResult.embedding_dimensions} dimensions`);
-        
-        // Reload persona data to get the updated embedding
-        await loadData();
-        
-        addLog('Persona embedding generation and storage complete!');
-      } else {
-        const errorResult = await embeddingResponse.json();
-        throw new Error(`Failed to store embedding: ${errorResult.error || 'Unknown error'}`);
-      }
-
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      addLog(`Error generating persona embedding: ${errorMessage}`);
-      setEmbeddingError(errorMessage);
-    } finally {
-      setIsGeneratingEmbedding(false);
-      addLog('=== PERSONA EMBEDDING GENERATION COMPLETE ===');
-    }
-  };
 
   // Function to embed a single document
   const embedDocument = async (document: DocumentData): Promise<number[]> => {
@@ -271,14 +167,11 @@ export function Dashboard() {
   // Function to embed all documents
   const embedAllDocuments = async () => {
     if (documents.length === 0) {
-      setEmbeddingError('No documents found to embed.');
       return;
     }
 
     setIsEmbeddingDocuments(true);
-    setEmbeddingError(null);
     setDocumentEmbeddingProgress({ current: 0, total: documents.length });
-    addLog('=== EMBEDDING ALL DOCUMENTS ===');
 
     try {
       let successCount = 0;
@@ -288,7 +181,6 @@ export function Dashboard() {
         const document = documents[i];
         setDocumentEmbeddingProgress({ current: i + 1, total: documents.length });
         
-        addLog(`Embedding document ${i + 1}/${documents.length}: ${document.title.substring(0, 50)}...`);
 
         try {
           // Generate embedding for this document
@@ -308,16 +200,11 @@ export function Dashboard() {
           
           if (embeddingResponse.ok) {
             successCount++;
-            addLog(`✓ Successfully embedded document ${document.document_id} (${embedding.length} dimensions)`);
           } else {
-            const errorResult = await embeddingResponse.json();
-            addLog(`✗ Failed to store embedding for ${document.document_id}: ${errorResult.error || 'Unknown error'}`);
             errorCount++;
           }
 
         } catch (err) {
-          const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-          addLog(`✗ Error embedding document ${document.document_id}: ${errorMessage}`);
           errorCount++;
         }
 
@@ -325,21 +212,12 @@ export function Dashboard() {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
-      addLog(`=== DOCUMENT EMBEDDING COMPLETE ===`);
-      addLog(`Successfully embedded: ${successCount} documents`);
-      addLog(`Errors: ${errorCount} documents`);
-      
-      if (errorCount > 0) {
-        setEmbeddingError(`${errorCount} documents failed to embed. Check console logs for details.`);
-      }
 
       // Reload data to get updated embeddings
       await loadData();
 
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      addLog(`Error in document embedding process: ${errorMessage}`);
-      setEmbeddingError(errorMessage);
+      // Error in document embedding process
     } finally {
       setIsEmbeddingDocuments(false);
       setDocumentEmbeddingProgress({ current: 0, total: 0 });
@@ -349,49 +227,33 @@ export function Dashboard() {
   const loadData = async () => {
     setIsLoading(true);
     setError(null);
-    addLog('=== LOADING DASHBOARD DATA ===');
     
     try {
       // Load persona data
-      addLog('Loading persona data...');
       const personaResponse = await fetch('http://localhost:8001/personas');
       if (personaResponse.ok) {
         const personas = await personaResponse.json();
         if (personas.length > 0) {
           setPersona(personas[0]);
-          addLog(`Loaded persona: ${personas[0].name || 'Unnamed'} (ID: ${personas[0].id})`);
-        } else {
-          addLog('No persona found in database');
         }
-      } else {
-        addLog('Failed to load persona data');
       }
 
       // Load all documents (we'll filter for embeddings in semantic matching)
-      addLog('Loading documents...');
       const documentsResponse = await fetch('http://localhost:8001/documents?limit=1000');
       if (documentsResponse.ok) {
         const documentsData = await documentsResponse.json();
         setDocuments(documentsData);
-        const documentsWithEmbeddings = documentsData.filter((doc: DocumentData) => 
-          doc.embedding && doc.embedding.length > 0
-        );
-        addLog(`Loaded ${documentsData.length} total documents, ${documentsWithEmbeddings.length} with embeddings`);
-      } else {
-        addLog('Failed to load documents data');
       }
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      addLog(`Error loading data: ${errorMessage}`);
       setError(errorMessage);
     } finally {
       setIsLoading(false);
-      addLog('=== DATA LOADING COMPLETE ===');
     }
   };
 
-  const performSemanticMatching = async () => {
+  const findMatches = async () => {
     if (!persona || !persona.embedding || documents.length === 0) {
       setError('Missing persona embedding or documents. Please ensure persona has been embedded and documents are loaded.');
       return;
@@ -399,12 +261,10 @@ export function Dashboard() {
 
     setIsLoading(true);
     setError(null);
-    const threshold = semanticThreshold / 10; // Convert from 0-10 scale to 0-1 scale
-    addLog(`=== PERFORMING SEMANTIC MATCHING (threshold: ${semanticThreshold}/10) ===`);
+    const semanticThresholdValue = semanticThreshold / 10; // Convert from 0-10 scale to 0-1 scale
 
     try {
       const personaEmbedding = persona.embedding;
-      addLog(`Persona embedding dimensions: ${personaEmbedding.length}`);
 
       // Filter documents that have embeddings
       const documentsWithEmbeddings = documents.filter(doc => 
@@ -416,21 +276,18 @@ export function Dashboard() {
         return;
       }
 
-      addLog(`Found ${documentsWithEmbeddings.length} documents with embeddings`);
-
-      const matches: MatchedDocument[] = [];
+      // Step 1: Perform semantic matching
+      const semanticMatches: MatchedDocument[] = [];
       const allSimilarities: {doc: DocumentData, similarity: number}[] = [];
 
       for (const doc of documentsWithEmbeddings) {
         // Type guard to ensure embedding exists
         if (!doc.embedding || doc.embedding.length === 0) {
-          addLog(`Skipping document ${doc.document_id} - no embedding`);
           continue;
         }
 
         // Check dimension compatibility
         if (doc.embedding.length !== personaEmbedding.length) {
-          addLog(`Skipping document ${doc.document_id} - dimension mismatch (${doc.embedding.length} vs ${personaEmbedding.length})`);
           continue;
         }
 
@@ -438,8 +295,8 @@ export function Dashboard() {
         const similarity = calculateCosineSimilarity(personaEmbedding, doc.embedding);
         allSimilarities.push({doc, similarity});
         
-        if (similarity >= threshold) { // Threshold for relevance
-          matches.push({
+        if (similarity >= semanticThresholdValue) {
+          semanticMatches.push({
             document: doc,
             similarityScore: similarity,
             relevanceReason: generateRelevanceReason(persona, doc, similarity)
@@ -447,25 +304,81 @@ export function Dashboard() {
         }
       }
 
-      // Sort all similarities to show top scores
-      allSimilarities.sort((a, b) => b.similarity - a.similarity);
-      addLog(`Top 10 similarity scores: ${allSimilarities.slice(0, 10).map(s => `${s.doc.title.substring(0, 30)}... (${s.similarity.toFixed(4)})`).join(', ')}`);
-      addLog(`Similarity range: ${allSimilarities[allSimilarities.length-1]?.similarity.toFixed(4)} to ${allSimilarities[0]?.similarity.toFixed(4)}`);
+      if (semanticMatches.length === 0) {
+        setMatchedDocuments([]);
+        setError(`No documents found above semantic threshold of ${semanticThreshold}/10`);
+        return;
+      }
 
-      // Sort by similarity score (highest first)
-      matches.sort((a, b) => b.similarityScore - a.similarityScore);
+      // Step 2: Perform GPT reasoning on semantic matches
+      setIsGeneratingReasoning(true);
+      setShouldStopReasoning(false);
+      setReasoningProgress({ current: 0, total: semanticMatches.length });
       
-      setMatchedDocuments(matches);
-      addLog(`Found ${matches.length} relevant documents above threshold ${semanticThreshold}/10`);
-      addLog(`Top matches: ${matches.slice(0, 3).map(m => `${m.document.title} (${(m.similarityScore * 10).toFixed(1)}/10)`).join(', ')}`);
+      // Create abort controller for cancelling requests
+      const controller = new AbortController();
+      setAbortController(controller);
+
+      const finalMatches: MatchedDocument[] = [];
+      let gptMatchesCount = 0;
+
+      for (let i = 0; i < semanticMatches.length; i++) {
+        // Check if user wants to stop
+        if (shouldStopReasoning) {
+          break;
+        }
+
+        const match = semanticMatches[i];
+        setReasoningProgress({ current: i + 1, total: semanticMatches.length });
+
+        try {
+          const gptResult = await getGPTReasoning(persona, match.document, controller.signal);
+          
+          // Count documents that pass GPT threshold
+          if (gptResult.relevanceScore >= gptThreshold) {
+            gptMatchesCount++;
+            finalMatches.push({
+              ...match,
+              gptReasoning: gptResult
+            });
+          }
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+          
+          // Check if this was an abort error
+          if (err instanceof Error && err.name === 'AbortError') {
+            break; // Exit the loop completely
+          } else {
+            // Continue with other documents even if one fails
+            console.error(`Error analyzing ${match.document.document_id}: ${errorMessage}`);
+          }
+        }
+
+        // Small delay to avoid overwhelming the GPT service
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      // Sort final matches by GPT score (highest first)
+      finalMatches.sort((a, b) => {
+        const scoreA = a.gptReasoning?.relevanceScore || 0;
+        const scoreB = b.gptReasoning?.relevanceScore || 0;
+        return scoreB - scoreA;
+      });
+      
+      setMatchedDocuments(finalMatches);
+
+      if (finalMatches.length === 0) {
+        setError(`No documents found above GPT threshold of ${gptThreshold}/10 after semantic filtering`);
+      }
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      addLog(`Error in semantic matching: ${errorMessage}`);
       setError(errorMessage);
     } finally {
       setIsLoading(false);
-      addLog('=== SEMANTIC MATCHING COMPLETE ===');
+      setIsGeneratingReasoning(false);
+      setReasoningProgress({ current: 0, total: 0 });
+      setAbortController(null);
     }
   };
 
@@ -543,7 +456,7 @@ export function Dashboard() {
     // Prepare document text
     const documentText = `${document.title}\n\n${document.text || ''}`.trim();
     
-    const prompt = `You are an AI assistant analyzing government document relevance. 
+    const prompt = `You are an AI assistant analyzing government document relevance with a focus on potential impacts and creative connections.
 
 PERSONA PROFILE:
 ${personaText}
@@ -554,18 +467,28 @@ Agency: ${document.agency_id || 'Unknown'}
 Type: ${document.document_type || 'Unknown'}
 Content: ${documentText}
 
-TASK: Analyze how relevant this document is to the persona above. Provide:
-1. A relevance score from 1-10 (10 = highly relevant, 1 = not relevant)
-2. Your reasoning for the score
-3. Your thought process (step-by-step analysis)
+TASK: Analyze how this legislation or policy could potentially impact the persona above. Be CREATIVE and THOUGHTFUL about:
+1. DIRECT impacts on the persona's interests, work, or life
+2. SECONDARY effects (how changes might ripple through their community, industry, or field)
+3. TERTIARY effects (broader societal changes that could eventually affect them)
+4. POTENTIAL opportunities or challenges that might emerge
+5. CREATIVE connections between seemingly unrelated policy areas
+
+SCORING GUIDELINES (be GENEROUS with relevance):
+- Score 6-10 for documents with ANY potential connection, even indirect ones
+- Consider how policy changes create ripple effects over time
+- Think about how regulatory changes in one area affect other sectors
+- Consider how funding changes might impact related programs
+- Look for opportunities for civic engagement or professional development
+- Even tangential connections deserve consideration if they could have future impact
 
 IMPORTANT: Use the special thought process format. Start your thought process with "THOUGHT_PROCESS:" and end with "END_THOUGHT_PROCESS:". This allows extraction of your reasoning steps.
 
 RESPONSE FORMAT:
 Relevance Score: [1-10]
-Reasoning: [Your explanation]
+Reasoning: [Your explanation focusing on potential impacts and creative connections]
 THOUGHT_PROCESS:
-[Your step-by-step analysis]
+[Your step-by-step analysis including direct, secondary, and tertiary effects]
 END_THOUGHT_PROCESS:`;
 
     const payload = {
@@ -611,103 +534,21 @@ END_THOUGHT_PROCESS:`;
     };
   };
 
-  // Function to generate GPT reasoning for all matched documents
-  const generateGPTReasoning = async () => {
-    if (matchedDocuments.length === 0) {
-      setEmbeddingError('No matched documents found. Please perform semantic matching first.');
-      return;
-    }
-
-    if (!persona) {
-      setEmbeddingError('No persona found. Please configure your persona first.');
-      return;
-    }
-
-    setIsGeneratingReasoning(true);
-    setShouldStopReasoning(false);
-    setEmbeddingError(null);
-    setReasoningProgress({ current: 0, total: matchedDocuments.length });
-    
-    // Create abort controller for cancelling requests
-    const controller = new AbortController();
-    setAbortController(controller);
-    
-    addLog('=== GENERATING GPT REASONING ===');
-
-    try {
-      const updatedMatches = [...matchedDocuments];
-
-      for (let i = 0; i < matchedDocuments.length; i++) {
-        // Check if user wants to stop
-        if (shouldStopReasoning) {
-          addLog('GPT analysis stopped by user');
-          break;
-        }
-
-        const match = matchedDocuments[i];
-        setReasoningProgress({ current: i + 1, total: matchedDocuments.length });
-        
-        addLog(`Analyzing document ${i + 1}/${matchedDocuments.length}: ${match.document.title.substring(0, 50)}...`);
-
-        try {
-          const gptResult = await getGPTReasoning(persona, match.document, controller.signal);
-          updatedMatches[i].gptReasoning = gptResult;
-          
-          addLog(`✓ GPT analysis complete for ${match.document.document_id}: Score ${gptResult.relevanceScore}/10`);
-        } catch (err) {
-          const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-          
-          // Check if this was an abort error
-          if (err instanceof Error && err.name === 'AbortError') {
-            addLog(`⏹️ Analysis cancelled for ${match.document.document_id}`);
-            break; // Exit the loop completely
-          } else {
-            addLog(`✗ Error analyzing ${match.document.document_id}: ${errorMessage}`);
-            
-            // Add error result
-            updatedMatches[i].gptReasoning = {
-              relevanceScore: 0,
-              reasoning: `Error: ${errorMessage}`,
-              thoughtProcess: 'Analysis failed'
-            };
-          }
-        }
-
-        // Small delay to avoid overwhelming the GPT service
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      setMatchedDocuments(updatedMatches);
-      addLog(`=== GPT REASONING COMPLETE ===`);
-      addLog(`Successfully analyzed ${updatedMatches.filter(m => m.gptReasoning && m.gptReasoning.relevanceScore > 0).length} documents`);
-
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      addLog(`Error in GPT reasoning process: ${errorMessage}`);
-      setEmbeddingError(errorMessage);
-    } finally {
-      setIsGeneratingReasoning(false);
-      setReasoningProgress({ current: 0, total: 0 });
-      setAbortController(null);
-    }
-  };
 
 
   // Comment drafting functions
   const handleStartComment = (documentId: string, documentTitle: string) => {
     setSelectedDocument({ id: documentId, title: documentTitle });
     setShowCommentDrafting(true);
-    addLog(`Starting comment draft for document: ${documentTitle}`);
   };
 
   const handleCloseCommentDrafting = () => {
     setShowCommentDrafting(false);
     setSelectedDocument(null);
-    addLog('Comment drafting closed');
   };
 
-  const handleCommentSubmitted = (commentId: string) => {
-    addLog(`Comment submitted successfully: ${commentId}`);
+  const handleCommentSubmitted = (_commentId: string) => {
+    // Comment submitted successfully
   };
 
   return (
@@ -754,7 +595,7 @@ END_THOUGHT_PROCESS:`;
                 background: persona ? (persona.embedding ? '#4CAF50' : '#FFA726') : '#FF6B6B' 
               }} />
               <span style={{ fontSize: '14px', color: '#B8B8B8' }}>
-                Persona: {persona ? `${persona.name || 'Unnamed'} (${persona.embedding ? 'Embedded' : 'Needs Embedding'})` : 'Not found'}
+                Persona: {persona ? `${persona.name || 'Unnamed'} (${persona.embedding ? 'Embedded' : 'Not Embedded'})` : 'Not found'}
               </span>
             </div>
             
@@ -791,47 +632,10 @@ END_THOUGHT_PROCESS:`;
             </div>
           )}
 
-          {embeddingError && (
-            <div style={{ marginTop: 16, color: '#FF6B6B', fontSize: '14px' }}>
-              ❌ Embedding Error: {embeddingError}
-            </div>
-          )}
 
           {/* Action Buttons */}
           <div style={{ marginTop: 16, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <button
-              onClick={loadData}
-              disabled={isLoading}
-              style={{
-                background: isLoading ? '#444' : '#2A2A2A',
-                color: '#B8B8B8',
-                border: '1px solid #444',
-                borderRadius: 6,
-                padding: '8px 16px',
-                fontSize: '14px',
-                cursor: isLoading ? 'not-allowed' : 'pointer',
-                opacity: isLoading ? 0.5 : 1
-              }}
-            >
-              {isLoading ? 'Loading...' : 'Refresh Data'}
-            </button>
             
-              <button
-              onClick={generateAndStorePersonaEmbedding}
-              disabled={isGeneratingEmbedding || !persona}
-                style={{
-                background: (isGeneratingEmbedding || !persona) ? '#444' : '#3C362A',
-                  color: '#FAFAFA',
-                  border: '1px solid #555',
-                  borderRadius: 6,
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                cursor: (isGeneratingEmbedding || !persona) ? 'not-allowed' : 'pointer',
-                opacity: (isGeneratingEmbedding || !persona) ? 0.5 : 1
-                }}
-              >
-              {isGeneratingEmbedding ? 'Generating...' : 'Generate Persona Embedding'}
-              </button>
             
               <button
               onClick={embedAllDocuments}
@@ -851,29 +655,8 @@ END_THOUGHT_PROCESS:`;
               </button>
             
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <label style={{ color: '#B8B8B8', fontSize: '14px', whiteSpace: 'nowrap' }}>
-                  Min Score:
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="10"
-                  step="0.5"
-                  value={semanticThreshold}
-                  onChange={(e) => setSemanticThreshold(parseFloat(e.target.value) || 5.0)}
-                  style={{
-                    width: '60px',
-                    padding: '4px 8px',
-                    background: '#2A2A2A',
-                    color: '#FAFAFA',
-                    border: '1px solid #444',
-                    borderRadius: 4,
-                    fontSize: '14px'
-                  }}
-                />
-                <span style={{ color: '#B8B8B8', fontSize: '14px' }}>/10</span>
                 <button
-                  onClick={performSemanticMatching}
+                  onClick={findMatches}
                   disabled={isLoading || !persona?.embedding || documents.length === 0}
                   style={{
                     background: (isLoading || !persona?.embedding || documents.length === 0) ? '#444' : '#2A4A2A',
@@ -886,33 +669,16 @@ END_THOUGHT_PROCESS:`;
                     opacity: (isLoading || !persona?.embedding || documents.length === 0) ? 0.5 : 1
                   }}
                 >
-                  {isLoading ? 'Matching...' : 'Semantic Match'}
+                  {isLoading ? (isGeneratingReasoning ? `Analyzing... (${reasoningProgress.current}/${reasoningProgress.total})` : 'Finding...') : 'Find Matches'}
                 </button>
               </div>
             
-              <button
-              onClick={generateGPTReasoning}
-              disabled={isGeneratingReasoning || matchedDocuments.length === 0}
-                style={{
-                background: (isGeneratingReasoning || matchedDocuments.length === 0) ? '#444' : '#4A2A4A',
-                  color: '#FAFAFA',
-                border: '1px solid #555',
-                  borderRadius: 6,
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                cursor: (isGeneratingReasoning || matchedDocuments.length === 0) ? 'not-allowed' : 'pointer',
-                opacity: (isGeneratingReasoning || matchedDocuments.length === 0) ? 0.5 : 1
-                }}
-              >
-              {isGeneratingReasoning ? `GPT Analysis... (${reasoningProgress.current}/${reasoningProgress.total})` : `GPT Reasoning (${matchedDocuments.length} docs)`}
-              </button>
             
               {isGeneratingReasoning && (
                 <button
                   onClick={() => {
                     if (abortController) {
                       abortController.abort();
-                      addLog('⏹️ Stopping GPT analysis...');
                     }
                   }}
                   style={{
@@ -930,76 +696,8 @@ END_THOUGHT_PROCESS:`;
               )}
           </div>
 
-          {/* Console Logs Toggle */}
-          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <button
-              onClick={() => setShowLogs(!showLogs)}
-              style={{
-                background: '#2A2A2A',
-                color: '#B8B8B8',
-                border: '1px solid #444',
-                borderRadius: 6,
-                padding: '8px 16px',
-                fontSize: '14px',
-                cursor: 'pointer'
-              }}
-            >
-              {showLogs ? 'Hide' : 'Show'} Console Logs ({consoleLogs.length})
-            </button>
-            
-            {consoleLogs.length > 0 && (
-              <button
-                onClick={() => setConsoleLogs([])}
-                style={{
-                  background: '#6B2C2C',
-                  color: '#FAFAFA',
-                  border: '1px solid #444',
-                  borderRadius: 6,
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                  cursor: 'pointer'
-                }}
-              >
-                Clear Logs
-              </button>
-            )}
-          </div>
-
-          {/* Console Logs Display */}
-          {showLogs && (
-            <div style={{ 
-              marginTop: 16, 
-              background: '#0A0A0A', 
-              border: '1px solid #333', 
-              borderRadius: 8, 
-              padding: 16,
-              maxHeight: '300px',
-              overflowY: 'auto'
-            }}>
-              <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#B8B8B8' }}>
-                Console Logs
-              </h4>
-              {consoleLogs.length === 0 ? (
-                <div style={{ color: '#666', fontSize: '12px', fontStyle: 'italic' }}>
-                  No logs yet.
-                </div>
-              ) : (
-                <div style={{ fontFamily: 'monospace', fontSize: '11px', lineHeight: '1.4' }}>
-                  {consoleLogs.map((log, index) => (
-                    <div key={index} style={{ 
-                      color: log.includes('ERROR') ? '#FF6B6B' : 
-                             log.includes('===') ? '#4CAF50' : '#B8B8B8',
-                      marginBottom: 4,
-                      wordBreak: 'break-word'
-                    }}>
-                      {log}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
         </div>
+
 
         {/* Matched Documents */}
         {matchedDocuments.length > 0 && (
@@ -1224,7 +922,7 @@ END_THOUGHT_PROCESS:`;
           }}>
             <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 600 }}>Configure Your Persona</h3>
             <p style={{ color: '#B8B8B8', fontSize: '14px', margin: 0 }}>
-              Set up your persona in the "My Persona" section and generate embeddings in Settings.
+              Set up your persona in the "Profile" section. Embeddings are generated automatically when you save.
             </p>
           </div>
         )}
@@ -1239,7 +937,7 @@ END_THOUGHT_PROCESS:`;
           }}>
             <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 600 }}>Generate Persona Embedding</h3>
             <p style={{ color: '#B8B8B8', fontSize: '14px', margin: 0 }}>
-              Go to Settings to generate an embedding for your persona before performing semantic matching.
+              Go to the Profile section and save your persona to generate an embedding automatically.
             </p>
           </div>
         )}

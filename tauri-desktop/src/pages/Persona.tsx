@@ -15,8 +15,25 @@ import {
   Grid,
   Alert,
   Divider,
-  Container
+  Container,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import PersonIcon from '@mui/icons-material/Person';
+import TargetIcon from '@mui/icons-material/GpsFixed';
+import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
+import NatureIcon from '@mui/icons-material/Nature';
+import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
+import ComputerIcon from '@mui/icons-material/Computer';
+import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
+import SchoolIcon from '@mui/icons-material/School';
+import SecurityIcon from '@mui/icons-material/Security';
+import WarningIcon from '@mui/icons-material/Warning';
+import LightbulbIcon from '@mui/icons-material/Lightbulb';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 type PersonaData = {
   name?: string;
@@ -42,6 +59,10 @@ export function Persona() {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
+  
+  // Embedding generation state
+  const [isGeneratingEmbedding, setIsGeneratingEmbedding] = useState(false);
+  const [embeddingError, setEmbeddingError] = useState<string | null>(null);
   
   // Policy interest categories
   const [selectedPolicyInterests, setSelectedPolicyInterests] = useState<string[]>([]);
@@ -97,9 +118,99 @@ export function Persona() {
     }
   };
 
+  // Utility function to prepare persona data for embedding
+  const preparePersonaForEmbedding = (personaData: PersonaData): string => {
+    if (!personaData) return '';
+    
+    const parts = [];
+    
+    // Basic information
+    if (personaData.name) parts.push(`Name: ${personaData.name}`);
+    if (personaData.role) parts.push(`Role: ${personaData.role}`);
+    if (personaData.location) parts.push(`Location: ${personaData.location}`);
+    if (personaData.ageRange) parts.push(`Age Range: ${personaData.ageRange}`);
+    if (personaData.employmentStatus) parts.push(`Employment Status: ${personaData.employmentStatus}`);
+    if (personaData.industry) parts.push(`Industry: ${personaData.industry}`);
+    
+    // Policy interests
+    if (selectedPolicyInterests && selectedPolicyInterests.length > 0) {
+      parts.push(`Policy Interests: ${selectedPolicyInterests.join(', ')}`);
+    }
+    
+    // Preferred agencies
+    if (selectedAgencies && selectedAgencies.length > 0) {
+      parts.push(`Preferred Agencies: ${selectedAgencies.join(', ')}`);
+    }
+    
+    // Impact level
+    if (selectedImpactLevels && selectedImpactLevels.length > 0) {
+      parts.push(`Impact Level: ${selectedImpactLevels.join(', ')}`);
+    }
+    
+    // Additional context
+    if (personaData.additionalContext) {
+      parts.push(`Additional Context: ${personaData.additionalContext}`);
+    }
+    
+    // Create a comprehensive description
+    const personaDescription = parts.join('. ');
+    
+    return personaDescription;
+  };
+
+  // Function to generate persona embedding using remote model
+  const generatePersonaEmbedding = async (personaData: PersonaData): Promise<number[]> => {
+    const personaText = preparePersonaForEmbedding(personaData);
+    
+    if (!personaText.trim()) {
+      throw new Error('No persona data available for embedding');
+    }
+    
+    // Get remote embedding configuration from localStorage
+    const remoteEmbeddingHost = localStorage.getItem('remoteEmbeddingHost') || '10.0.4.52';
+    const remoteEmbeddingPort = localStorage.getItem('remoteEmbeddingPort') || '11434';
+    const remoteEmbeddingModel = localStorage.getItem('remoteEmbeddingModel') || 'nomic-embed-text:latest';
+    
+    const url = `http://${remoteEmbeddingHost}:${remoteEmbeddingPort}/api/embeddings`;
+    const payload = {
+      model: remoteEmbeddingModel,
+      prompt: personaText
+    };
+
+    console.log('=== GENERATING PERSONA EMBEDDING ===');
+    console.log(`Persona text: ${personaText.substring(0, 200)}...`);
+    console.log(`URL: ${url}`);
+    console.log(`Model: ${remoteEmbeddingModel}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    const result = await response.json();
+    
+    if (!result.embedding || !Array.isArray(result.embedding)) {
+      throw new Error('Invalid embedding response format');
+    }
+
+    console.log(`Generated embedding with ${result.embedding.length} dimensions`);
+    return result.embedding;
+  };
+
   async function save() {
     setErrorText(null);
+    setEmbeddingError(null);
     setSaving(true);
+    setIsGeneratingEmbedding(true);
+    
     try {
       const personaData = {
         name: persona.name,
@@ -117,6 +228,7 @@ export function Persona() {
       // Check if we have existing personas to determine if this is an update or create
       const existingResponse = await fetch('http://localhost:8001/personas');
       let response;
+      let savedPersona;
       
       if (existingResponse.ok) {
         const existingPersonas = await existingResponse.json();
@@ -154,16 +266,49 @@ export function Persona() {
         throw new Error(`Failed to save persona: ${response.statusText}`);
       }
 
-      const savedPersona = await response.json();
+      savedPersona = await response.json();
+      console.log('Persona data saved successfully:', savedPersona);
+
+      // Generate and store embedding
+      console.log('=== GENERATING PERSONA EMBEDDING ===');
+      try {
+        const embedding = await generatePersonaEmbedding(persona);
+        
+        // Store the embedding in the database
+        const embeddingResponse = await fetch('http://localhost:8001/personas/embedding', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            persona_id: savedPersona.id,
+            embedding: embedding
+          })
+        });
+        
+        if (embeddingResponse.ok) {
+          const embeddingResult = await embeddingResponse.json();
+          console.log(`Successfully stored persona embedding in database: ${embeddingResult.embedding_dimensions} dimensions`);
+          console.log('Persona embedding generation and storage complete!');
+        } else {
+          const errorResult = await embeddingResponse.json();
+          throw new Error(`Failed to store embedding: ${errorResult.error || 'Unknown error'}`);
+        }
+      } catch (embeddingErr) {
+        const errorMessage = embeddingErr instanceof Error ? embeddingErr.message : 'Unknown error';
+        console.error(`Error generating persona embedding: ${errorMessage}`);
+        setEmbeddingError(errorMessage);
+        // Don't throw here - we still want to save the persona data even if embedding fails
+      }
       
       setIsDirty(false);
       setLastSaved(savedPersona.updated_at || savedPersona.created_at);
-      console.log('Persona data saved successfully:', savedPersona);
     } catch (e: any) {
       console.error('Error saving persona data:', e);
       setErrorText(String(e?.message || e));
     } finally {
       setSaving(false);
+      setIsGeneratingEmbedding(false);
     }
   }
 
@@ -180,7 +325,7 @@ export function Persona() {
         }}
       >
         <Typography variant="h4" component="h1" sx={{ margin: 0, color: '#FAFAFA' }}>
-          My Persona
+          Profile
         </Typography>
         <Typography variant="body2" sx={{ color: '#B8B8B8', marginTop: 1 }}>
           Configure your civic profile
@@ -218,93 +363,134 @@ export function Persona() {
             </Typography>
 
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              {/* Basic Information */}
-              <TextField
-                label="Display Name (Optional)"
-              value={persona.name || ''} 
-              onChange={(e) => { setPersona({ ...persona, name: e.target.value }); setIsDirty(true); }} 
-              placeholder="How you'd like to be addressed" 
-                fullWidth
-                variant="outlined"
-              />
-
-              <TextField
-                label="Primary Role"
-              value={persona.role || ''} 
-              onChange={(e) => { setPersona({ ...persona, role: e.target.value }); setIsDirty(true); }} 
-              placeholder="e.g., Small Business Owner, Student, Advocate" 
-                fullWidth
-                variant="outlined"
-              />
-
-              <TextField
-                label="Location/State"
-                value={persona.location || ''}
-                onChange={(e) => { setPersona({ ...persona, location: e.target.value }); setIsDirty(true); }}
-                placeholder="e.g., California, New York, Texas"
-                fullWidth
-                variant="outlined"
-              />
-
-              <FormControl fullWidth>
-                <InputLabel>Age Range</InputLabel>
-                <Select
-                  value={persona.ageRange || ''}
-                  onChange={(e) => { setPersona({ ...persona, ageRange: e.target.value }); setIsDirty(true); }}
-                  label="Age Range"
+              {/* Basic Information Accordion */}
+              <Accordion 
+                defaultExpanded
+                sx={{ 
+                  background: '#1A1A1A', 
+                  border: '1px solid #333',
+                  '&:before': { display: 'none' },
+                  '&.Mui-expanded': { margin: 0 }
+                }}
+              >
+                <AccordionSummary
+                  expandIcon={<ExpandMoreIcon sx={{ color: '#FAFAFA' }} />}
+                  sx={{ 
+                    background: '#2A2A2A',
+                    borderBottom: '1px solid #333',
+                    '&.Mui-expanded': { minHeight: 'auto' }
+                  }}
                 >
-                  <MenuItem value="">Select age range</MenuItem>
-                  <MenuItem value="18-24">18-24</MenuItem>
-                  <MenuItem value="25-34">25-34</MenuItem>
-                  <MenuItem value="35-44">35-44</MenuItem>
-                  <MenuItem value="45-54">45-54</MenuItem>
-                  <MenuItem value="55-64">55-64</MenuItem>
-                  <MenuItem value="65+">65+</MenuItem>
-                </Select>
-              </FormControl>
+                  <Typography variant="h6" sx={{ color: '#FAFAFA', display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <PersonIcon /> Basic Information
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails sx={{ p: 3 }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <TextField
+                      label="Display Name (Optional)"
+                      value={persona.name || ''} 
+                      onChange={(e) => { setPersona({ ...persona, name: e.target.value }); setIsDirty(true); }} 
+                      placeholder="How you'd like to be addressed" 
+                      fullWidth
+                      variant="outlined"
+                    />
 
-              <FormControl fullWidth>
-                <InputLabel>Employment Status</InputLabel>
-                <Select
-                  value={persona.employmentStatus || ''}
-                  onChange={(e) => { setPersona({ ...persona, employmentStatus: e.target.value }); setIsDirty(true); }}
-                  label="Employment Status"
+                    <TextField
+                      label="Primary Role"
+                      value={persona.role || ''} 
+                      onChange={(e) => { setPersona({ ...persona, role: e.target.value }); setIsDirty(true); }} 
+                      placeholder="e.g., Small Business Owner, Student, Advocate" 
+                      fullWidth
+                      variant="outlined"
+                    />
+
+                    <TextField
+                      label="Location/State"
+                      value={persona.location || ''}
+                      onChange={(e) => { setPersona({ ...persona, location: e.target.value }); setIsDirty(true); }}
+                      placeholder="e.g., California, New York, Texas"
+                      fullWidth
+                      variant="outlined"
+                    />
+
+                    <FormControl fullWidth>
+                      <InputLabel>Age Range</InputLabel>
+                      <Select
+                        value={persona.ageRange || ''}
+                        onChange={(e) => { setPersona({ ...persona, ageRange: e.target.value }); setIsDirty(true); }}
+                        label="Age Range"
+                      >
+                        <MenuItem value="">Select age range</MenuItem>
+                        <MenuItem value="18-24">18-24</MenuItem>
+                        <MenuItem value="25-34">25-34</MenuItem>
+                        <MenuItem value="35-44">35-44</MenuItem>
+                        <MenuItem value="45-54">45-54</MenuItem>
+                        <MenuItem value="55-64">55-64</MenuItem>
+                        <MenuItem value="65+">65+</MenuItem>
+                      </Select>
+                    </FormControl>
+
+                    <FormControl fullWidth>
+                      <InputLabel>Employment Status</InputLabel>
+                      <Select
+                        value={persona.employmentStatus || ''}
+                        onChange={(e) => { setPersona({ ...persona, employmentStatus: e.target.value }); setIsDirty(true); }}
+                        label="Employment Status"
+                      >
+                        <MenuItem value="">Select employment status</MenuItem>
+                        <MenuItem value="Student">Student</MenuItem>
+                        <MenuItem value="Employed">Employed</MenuItem>
+                        <MenuItem value="Self-employed">Self-employed</MenuItem>
+                        <MenuItem value="Unemployed">Unemployed</MenuItem>
+                        <MenuItem value="Retired">Retired</MenuItem>
+                        <MenuItem value="Other">Other</MenuItem>
+                      </Select>
+                    </FormControl>
+
+                    <TextField
+                      label="Industry/Profession (Be Specific)"
+                      value={persona.industry || ''}
+                      onChange={(e) => { setPersona({ ...persona, industry: e.target.value }); setIsDirty(true); }}
+                      placeholder="e.g., 'Small Business SaaS Software' instead of 'Technology', 'Telehealth Services' instead of 'Healthcare'"
+                      fullWidth
+                      variant="outlined"
+                      helperText="Avoid broad terms like 'Technology' or 'Healthcare' - be specific about your niche or specialization"
+                    />
+                  </Box>
+                </AccordionDetails>
+              </Accordion>
+
+              {/* Policy Interest Categories Accordion */}
+              <Accordion 
+                sx={{ 
+                  background: '#1A1A1A', 
+                  border: '1px solid #333',
+                  '&:before': { display: 'none' },
+                  '&.Mui-expanded': { margin: 0 }
+                }}
+              >
+                <AccordionSummary
+                  expandIcon={<ExpandMoreIcon sx={{ color: '#FAFAFA' }} />}
+                  sx={{ 
+                    background: '#2A2A2A',
+                    borderBottom: '1px solid #333',
+                    '&.Mui-expanded': { minHeight: 'auto' }
+                  }}
                 >
-                  <MenuItem value="">Select employment status</MenuItem>
-                  <MenuItem value="Student">Student</MenuItem>
-                  <MenuItem value="Employed">Employed</MenuItem>
-                  <MenuItem value="Self-employed">Self-employed</MenuItem>
-                  <MenuItem value="Unemployed">Unemployed</MenuItem>
-                  <MenuItem value="Retired">Retired</MenuItem>
-                  <MenuItem value="Other">Other</MenuItem>
-                </Select>
-              </FormControl>
-
-              <TextField
-                label="Industry/Profession (Be Specific)"
-                value={persona.industry || ''}
-                onChange={(e) => { setPersona({ ...persona, industry: e.target.value }); setIsDirty(true); }}
-                placeholder="e.g., 'Small Business SaaS Software' instead of 'Technology', 'Telehealth Services' instead of 'Healthcare'"
-                fullWidth
-                variant="outlined"
-                helperText="⚠️ Avoid broad terms like 'Technology' or 'Healthcare' - be specific about your niche or specialization"
-              />
-
-              <Divider sx={{ my: 2 }} />
-
-              {/* Policy Interest Categories */}
-              <Box>
-                <Typography variant="h6" sx={{ color: '#FAFAFA', marginBottom: 1 }}>
-                  Specific Policy Interest Areas
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 2 }}>
-                  Be specific! Instead of "Technology", select "AI Regulation" or "Data Privacy". This helps avoid irrelevant matches.
-                </Typography>
-                <Grid container spacing={2}>
+                  <Typography variant="h6" sx={{ color: '#FAFAFA', display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <TargetIcon /> Policy Interest Areas
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails sx={{ p: 3 }}>
+                  <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 2 }}>
+                    Be specific! Instead of "Technology", select "AI Regulation" or "Data Privacy". This helps avoid irrelevant matches.
+                  </Typography>
+                  <Grid container spacing={2}>
                   {/* Environmental & Energy */}
                   <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#4CAF50', fontWeight: 600, mb: 1 }}>
-                      🌱 Environmental & Energy
+                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <NatureIcon /> Environmental & Energy
                     </Typography>
                     <Grid container spacing={1}>
                       {[
@@ -330,6 +516,12 @@ export function Persona() {
                                   }
                                   setIsDirty(true);
                                 }}
+                                sx={{
+                                  color: '#B8B8B8',
+                                  '&.Mui-checked': {
+                                    color: '#B8B8B8',
+                                  },
+                                }}
                               />
                             }
                             label={interest}
@@ -342,8 +534,8 @@ export function Persona() {
 
                   {/* Healthcare & Medical */}
                   <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#2196F3', fontWeight: 600, mb: 1 }}>
-                      🏥 Healthcare & Medical
+                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <LocalHospitalIcon /> Healthcare & Medical
                     </Typography>
                     <Grid container spacing={1}>
                       {[
@@ -365,6 +557,12 @@ export function Persona() {
                                   }
                                   setIsDirty(true);
                                 }}
+                                sx={{
+                                  color: '#B8B8B8',
+                                  '&.Mui-checked': {
+                                    color: '#B8B8B8',
+                                  },
+                                }}
                               />
                             }
                             label={interest}
@@ -377,8 +575,8 @@ export function Persona() {
 
                   {/* Technology & Digital */}
                   <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#9C27B0', fontWeight: 600, mb: 1 }}>
-                      💻 Technology & Digital
+                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <ComputerIcon /> Technology & Digital
                     </Typography>
                     <Grid container spacing={1}>
                       {[
@@ -402,6 +600,12 @@ export function Persona() {
                                   }
                                   setIsDirty(true);
                                 }}
+                                sx={{
+                                  color: '#B8B8B8',
+                                  '&.Mui-checked': {
+                                    color: '#B8B8B8',
+                                  },
+                                }}
                               />
                             }
                             label={interest}
@@ -414,8 +618,8 @@ export function Persona() {
 
                   {/* Financial & Banking */}
                   <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#FF9800', fontWeight: 600, mb: 1 }}>
-                      💰 Financial & Banking
+                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <AttachMoneyIcon /> Financial & Banking
                     </Typography>
                     <Grid container spacing={1}>
                       {[
@@ -436,6 +640,12 @@ export function Persona() {
                                   }
                                   setIsDirty(true);
                                 }}
+                                sx={{
+                                  color: '#B8B8B8',
+                                  '&.Mui-checked': {
+                                    color: '#B8B8B8',
+                                  },
+                                }}
                               />
                             }
                             label={interest}
@@ -448,8 +658,8 @@ export function Persona() {
 
                   {/* Transportation & Infrastructure */}
                   <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#607D8B', fontWeight: 600, mb: 1 }}>
-                      🚗 Transportation & Infrastructure
+                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <DirectionsCarIcon /> Transportation & Infrastructure
                     </Typography>
                     <Grid container spacing={1}>
                       {[
@@ -471,6 +681,12 @@ export function Persona() {
                                   }
                                   setIsDirty(true);
                                 }}
+                                sx={{
+                                  color: '#B8B8B8',
+                                  '&.Mui-checked': {
+                                    color: '#B8B8B8',
+                                  },
+                                }}
                               />
                             }
                             label={interest}
@@ -483,8 +699,8 @@ export function Persona() {
 
                   {/* Education & Labor */}
                   <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#795548', fontWeight: 600, mb: 1 }}>
-                      🎓 Education & Labor
+                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <SchoolIcon /> Education & Labor
                     </Typography>
                     <Grid container spacing={1}>
                       {[
@@ -508,6 +724,12 @@ export function Persona() {
                                   }
                                   setIsDirty(true);
                                 }}
+                                sx={{
+                                  color: '#B8B8B8',
+                                  '&.Mui-checked': {
+                                    color: '#B8B8B8',
+                                  },
+                                }}
                               />
                             }
                             label={interest}
@@ -520,8 +742,8 @@ export function Persona() {
 
                   {/* Consumer & Safety */}
                   <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#E91E63', fontWeight: 600, mb: 1 }}>
-                      🛡️ Consumer & Safety
+                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <SecurityIcon /> Consumer & Safety
                     </Typography>
                     <Grid container spacing={1}>
                       {[
@@ -542,6 +764,12 @@ export function Persona() {
                                   }
                                   setIsDirty(true);
                                 }}
+                                sx={{
+                                  color: '#B8B8B8',
+                                  '&.Mui-checked': {
+                                    color: '#B8B8B8',
+                                  },
+                                }}
                               />
                             }
                             label={interest}
@@ -554,8 +782,8 @@ export function Persona() {
 
                   {/* Security & Immigration */}
                   <Grid item xs={12}>
-                    <Typography variant="subtitle1" sx={{ color: '#F44336', fontWeight: 600, mb: 1 }}>
-                      🔒 Security & Immigration
+                    <Typography variant="subtitle1" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <SecurityIcon /> Security & Immigration
                     </Typography>
                     <Grid container spacing={1}>
                       {[
@@ -574,6 +802,12 @@ export function Persona() {
                                   }
                                   setIsDirty(true);
                                 }}
+                                sx={{
+                                  color: '#B8B8B8',
+                                  '&.Mui-checked': {
+                                    color: '#B8B8B8',
+                                  },
+                                }}
                               />
                             }
                             label={interest}
@@ -583,22 +817,38 @@ export function Persona() {
                       ))}
                     </Grid>
                   </Grid>
-                </Grid>
-                <Typography variant="body2" sx={{ color: '#FFA726', marginTop: 2, fontStyle: 'italic' }}>
-                  💡 Tip: Select only the areas you're genuinely interested in. Too many broad categories can lead to irrelevant matches.
-                </Typography>
-              </Box>
+                  </Grid>
+                  <Typography variant="body2" sx={{ color: '#B8B8B8', marginTop: 2, fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <LightbulbIcon /> Tip: Select only the areas you're genuinely interested in. Too many broad categories can lead to irrelevant matches.
+                  </Typography>
+                </AccordionDetails>
+              </Accordion>
 
-              <Divider sx={{ my: 2 }} />
-
-              {/* Regulatory Focus Areas */}
-              <Box>
-                <Typography variant="h6" sx={{ color: '#FAFAFA', marginBottom: 1 }}>
-                  Regulatory Focus Areas
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 2 }}>
-                  Help us prioritize which regulations to show you
-                </Typography>
+              {/* Regulatory Focus Areas Accordion */}
+              <Accordion 
+                sx={{ 
+                  background: '#1A1A1A', 
+                  border: '1px solid #333',
+                  '&:before': { display: 'none' },
+                  '&.Mui-expanded': { margin: 0 }
+                }}
+              >
+                <AccordionSummary
+                  expandIcon={<ExpandMoreIcon sx={{ color: '#FAFAFA' }} />}
+                  sx={{ 
+                    background: '#2A2A2A',
+                    borderBottom: '1px solid #333',
+                    '&.Mui-expanded': { minHeight: 'auto' }
+                  }}
+                >
+                  <Typography variant="h6" sx={{ color: '#FAFAFA', display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <AccountBalanceIcon /> Regulatory Focus Areas
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails sx={{ p: 3 }}>
+                  <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 2 }}>
+                    Help us prioritize which regulations to show you
+                  </Typography>
 
                 <Box sx={{ mb: 3 }}>
                   <Typography variant="subtitle1" sx={{ color: '#FAFAFA', marginBottom: 2 }}>
@@ -607,13 +857,20 @@ export function Persona() {
                   <Grid container spacing={2}>
                     {/* Health & Safety */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#2196F3', fontWeight: 600, mb: 1 }}>
-                        🏥 Health & Safety
+                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <LocalHospitalIcon /> Health & Safety
                       </Typography>
                       <Grid container spacing={1}>
                         {[
                           'Food and Drug Administration (FDA)',
-                          'Department of Health and Human Services (HHS)'
+                          'Department of Health and Human Services (HHS)',
+                          'Centers for Medicare & Medicaid Services (CMS)',
+                          'Centers for Disease Control and Prevention (CDC)',
+                          'National Institutes of Health (NIH)',
+                          'Health Resources and Services Administration (HRSA)',
+                          'Substance Abuse and Mental Health Services Administration (SAMHSA)',
+                          'Agency for Healthcare Research and Quality (AHRQ)',
+                          'Indian Health Service (IHS)'
                         ].map((agency) => (
                           <Grid item xs={12} key={agency}>
                             <FormControlLabel
@@ -628,10 +885,16 @@ export function Persona() {
                                     }
                                     setIsDirty(true);
                                   }}
+                                  sx={{
+                                    color: '#B8B8B8',
+                                    '&.Mui-checked': {
+                                      color: '#B8B8B8',
+                                    },
+                                  }}
                                 />
                               }
                               label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
                             />
                           </Grid>
                         ))}
@@ -640,13 +903,23 @@ export function Persona() {
 
                     {/* Environment & Energy */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#4CAF50', fontWeight: 600, mb: 1 }}>
-                        🌱 Environment & Energy
+                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <NatureIcon /> Environment & Energy
                       </Typography>
                       <Grid container spacing={1}>
                         {[
                           'Environmental Protection Agency (EPA)',
-                          'Department of Energy (DOE)'
+                          'Department of Energy (DOE)',
+                          'Bureau of Land Management (BLM)',
+                          'Fish and Wildlife Service (FWS)',
+                          'National Park Service (NPS)',
+                          'Forest Service (USFS)',
+                          'Nuclear Regulatory Commission (NRC)',
+                          'Federal Energy Regulatory Commission (FERC)',
+                          'Bureau of Ocean Energy Management (BOEM)',
+                          'Bureau of Safety and Environmental Enforcement (BSEE)',
+                          'U.S. Geological Survey (USGS)',
+                          'National Oceanic and Atmospheric Administration (NOAA)'
                         ].map((agency) => (
                           <Grid item xs={12} key={agency}>
                             <FormControlLabel
@@ -661,10 +934,16 @@ export function Persona() {
                                     }
                                     setIsDirty(true);
                                   }}
+                                  sx={{
+                                    color: '#B8B8B8',
+                                    '&.Mui-checked': {
+                                      color: '#B8B8B8',
+                                    },
+                                  }}
                                 />
                               }
                               label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
                             />
                           </Grid>
                         ))}
@@ -673,12 +952,18 @@ export function Persona() {
 
                     {/* Technology & Communications */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#9C27B0', fontWeight: 600, mb: 1 }}>
-                        💻 Technology & Communications
+                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <ComputerIcon /> Technology & Communications
                       </Typography>
                       <Grid container spacing={1}>
                         {[
-                          'Federal Communications Commission (FCC)'
+                          'Federal Communications Commission (FCC)',
+                          'National Telecommunications and Information Administration (NTIA)',
+                          'Federal Trade Commission (FTC)',
+                          'National Institute of Standards and Technology (NIST)',
+                          'Cybersecurity and Infrastructure Security Agency (CISA)',
+                          'National Science Foundation (NSF)',
+                          'Defense Advanced Research Projects Agency (DARPA)'
                         ].map((agency) => (
                           <Grid item xs={12} key={agency}>
                             <FormControlLabel
@@ -693,10 +978,16 @@ export function Persona() {
                                     }
                                     setIsDirty(true);
                                   }}
+                                  sx={{
+                                    color: '#B8B8B8',
+                                    '&.Mui-checked': {
+                                      color: '#B8B8B8',
+                                    },
+                                  }}
                                 />
                               }
                               label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
                             />
                           </Grid>
                         ))}
@@ -705,14 +996,23 @@ export function Persona() {
 
                     {/* Financial & Consumer */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#FF9800', fontWeight: 600, mb: 1 }}>
-                        💰 Financial & Consumer
+                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <AttachMoneyIcon /> Financial & Consumer
                       </Typography>
                       <Grid container spacing={1}>
                         {[
                           'Securities and Exchange Commission (SEC)',
                           'Consumer Financial Protection Bureau (CFPB)',
-                          'Federal Trade Commission (FTC)'
+                          'Federal Trade Commission (FTC)',
+                          'Federal Reserve System (Fed)',
+                          'Office of the Comptroller of the Currency (OCC)',
+                          'Federal Deposit Insurance Corporation (FDIC)',
+                          'National Credit Union Administration (NCUA)',
+                          'Commodity Futures Trading Commission (CFTC)',
+                          'Financial Crimes Enforcement Network (FinCEN)',
+                          'Internal Revenue Service (IRS)',
+                          'Treasury Department (USDT)',
+                          'Small Business Administration (SBA)'
                         ].map((agency) => (
                           <Grid item xs={12} key={agency}>
                             <FormControlLabel
@@ -727,10 +1027,16 @@ export function Persona() {
                                     }
                                     setIsDirty(true);
                                   }}
+                                  sx={{
+                                    color: '#B8B8B8',
+                                    '&.Mui-checked': {
+                                      color: '#B8B8B8',
+                                    },
+                                  }}
                                 />
                               }
                               label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
                             />
                           </Grid>
                         ))}
@@ -739,12 +1045,22 @@ export function Persona() {
 
                     {/* Transportation & Infrastructure */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#607D8B', fontWeight: 600, mb: 1 }}>
-                        🚗 Transportation & Infrastructure
+                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <DirectionsCarIcon /> Transportation & Infrastructure
                       </Typography>
                       <Grid container spacing={1}>
                         {[
-                          'Department of Transportation (DOT)'
+                          'Department of Transportation (DOT)',
+                          'Federal Aviation Administration (FAA)',
+                          'Federal Highway Administration (FHWA)',
+                          'Federal Motor Carrier Safety Administration (FMCSA)',
+                          'Federal Railroad Administration (FRA)',
+                          'Federal Transit Administration (FTA)',
+                          'Maritime Administration (MARAD)',
+                          'National Highway Traffic Safety Administration (NHTSA)',
+                          'Pipeline and Hazardous Materials Safety Administration (PHMSA)',
+                          'Army Corps of Engineers (USACE)',
+                          'Federal Housing Administration (FHA)'
                         ].map((agency) => (
                           <Grid item xs={12} key={agency}>
                             <FormControlLabel
@@ -759,10 +1075,16 @@ export function Persona() {
                                     }
                                     setIsDirty(true);
                                   }}
+                                  sx={{
+                                    color: '#B8B8B8',
+                                    '&.Mui-checked': {
+                                      color: '#B8B8B8',
+                                    },
+                                  }}
                                 />
                               }
                               label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
                             />
                           </Grid>
                         ))}
@@ -771,12 +1093,20 @@ export function Persona() {
 
                     {/* Labor & Employment */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#795548', fontWeight: 600, mb: 1 }}>
-                        🎓 Labor & Employment
+                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <SchoolIcon /> Labor & Employment
                       </Typography>
                       <Grid container spacing={1}>
                         {[
-                          'Department of Labor (DOL)'
+                          'Department of Labor (DOL)',
+                          'Occupational Safety and Health Administration (OSHA)',
+                          'Equal Employment Opportunity Commission (EEOC)',
+                          'National Labor Relations Board (NLRB)',
+                          'Mine Safety and Health Administration (MSHA)',
+                          'Wage and Hour Division (WHD)',
+                          'Office of Federal Contract Compliance Programs (OFCCP)',
+                          'Department of Education (ED)',
+                          'Office for Civil Rights (OCR)'
                         ].map((agency) => (
                           <Grid item xs={12} key={agency}>
                             <FormControlLabel
@@ -791,10 +1121,16 @@ export function Persona() {
                                     }
                                     setIsDirty(true);
                                   }}
+                                  sx={{
+                                    color: '#B8B8B8',
+                                    '&.Mui-checked': {
+                                      color: '#B8B8B8',
+                                    },
+                                  }}
                                 />
                               }
                               label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
                             />
                           </Grid>
                         ))}
@@ -803,12 +1139,23 @@ export function Persona() {
 
                     {/* Security & Immigration */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#F44336', fontWeight: 600, mb: 1 }}>
-                        🔒 Security & Immigration
+                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <SecurityIcon /> Security & Immigration
                       </Typography>
                       <Grid container spacing={1}>
                         {[
-                          'Department of Homeland Security (DHS)'
+                          'Department of Homeland Security (DHS)',
+                          'U.S. Citizenship and Immigration Services (USCIS)',
+                          'Customs and Border Protection (CBP)',
+                          'Immigration and Customs Enforcement (ICE)',
+                          'Transportation Security Administration (TSA)',
+                          'Federal Emergency Management Agency (FEMA)',
+                          'U.S. Coast Guard (USCG)',
+                          'Department of Justice (DOJ)',
+                          'Federal Bureau of Investigation (FBI)',
+                          'Bureau of Alcohol, Tobacco, Firearms and Explosives (ATF)',
+                          'Drug Enforcement Administration (DEA)',
+                          'U.S. Marshals Service (USMS)'
                         ].map((agency) => (
                           <Grid item xs={12} key={agency}>
                             <FormControlLabel
@@ -823,24 +1170,36 @@ export function Persona() {
                                     }
                                     setIsDirty(true);
                                   }}
+                                  sx={{
+                                    color: '#B8B8B8',
+                                    '&.Mui-checked': {
+                                      color: '#B8B8B8',
+                                    },
+                                  }}
                                 />
                               }
                               label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
                             />
                           </Grid>
                         ))}
                       </Grid>
                     </Grid>
 
-                    {/* Other */}
+                    {/* Agriculture & Food */}
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" sx={{ color: '#9E9E9E', fontWeight: 600, mb: 1 }}>
-                        📋 Other
+                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <NatureIcon /> Agriculture & Food
                       </Typography>
                       <Grid container spacing={1}>
                         {[
-                          'Other'
+                          'Department of Agriculture (USDA)',
+                          'Food Safety and Inspection Service (FSIS)',
+                          'Animal and Plant Health Inspection Service (APHIS)',
+                          'Agricultural Marketing Service (AMS)',
+                          'Farm Service Agency (FSA)',
+                          'Natural Resources Conservation Service (NRCS)',
+                          'Rural Development (RD)'
                         ].map((agency) => (
                           <Grid item xs={12} key={agency}>
                             <FormControlLabel
@@ -855,10 +1214,103 @@ export function Persona() {
                                     }
                                     setIsDirty(true);
                                   }}
+                                  sx={{
+                                    color: '#B8B8B8',
+                                    '&.Mui-checked': {
+                                      color: '#B8B8B8',
+                                    },
+                                  }}
                                 />
                               }
                               label={agency}
-                              sx={{ color: '#FAFAFA', fontSize: '0.9rem' }}
+                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
+                            />
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Grid>
+
+                    {/* Defense & Military */}
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <SecurityIcon /> Defense & Military
+                      </Typography>
+                      <Grid container spacing={1}>
+                        {[
+                          'Department of Defense (DOD)',
+                          'Department of Veterans Affairs (VA)',
+                          'Defense Contract Management Agency (DCMA)',
+                          'Defense Logistics Agency (DLA)',
+                          'National Security Agency (NSA)',
+                          'Central Intelligence Agency (CIA)'
+                        ].map((agency) => (
+                          <Grid item xs={12} key={agency}>
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={selectedAgencies.includes(agency)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedAgencies([...selectedAgencies, agency]);
+                                    } else {
+                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                    }
+                                    setIsDirty(true);
+                                  }}
+                                  sx={{
+                                    color: '#B8B8B8',
+                                    '&.Mui-checked': {
+                                      color: '#B8B8B8',
+                                    },
+                                  }}
+                                />
+                              }
+                              label={agency}
+                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
+                            />
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Grid>
+
+                    {/* International & Trade */}
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" sx={{ color: '#B8B8B8', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <AccountBalanceIcon /> International & Trade
+                      </Typography>
+                      <Grid container spacing={1}>
+                        {[
+                          'Department of State (DOS)',
+                          'Department of Commerce (DOC)',
+                          'International Trade Administration (ITA)',
+                          'Bureau of Industry and Security (BIS)',
+                          'U.S. Trade Representative (USTR)',
+                          'Export-Import Bank of the United States (EXIM)',
+                          'Overseas Private Investment Corporation (OPIC)'
+                        ].map((agency) => (
+                          <Grid item xs={12} key={agency}>
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={selectedAgencies.includes(agency)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedAgencies([...selectedAgencies, agency]);
+                                    } else {
+                                      setSelectedAgencies(selectedAgencies.filter(a => a !== agency));
+                                    }
+                                    setIsDirty(true);
+                                  }}
+                                  sx={{
+                                    color: '#B8B8B8',
+                                    '&.Mui-checked': {
+                                      color: '#B8B8B8',
+                                    },
+                                  }}
+                                />
+                              }
+                              label={agency}
+                              sx={{ color: '#FAFAFA', fontSize: '0.85rem' }}
                             />
                           </Grid>
                         ))}
@@ -891,6 +1343,12 @@ export function Persona() {
                                 }
                                 setIsDirty(true);
                               }}
+                              sx={{
+                                color: '#B8B8B8',
+                                '&.Mui-checked': {
+                                  color: '#B8B8B8',
+                                },
+                              }}
                             />
                           }
                           label={impact}
@@ -900,47 +1358,58 @@ export function Persona() {
                     ))}
                   </Grid>
                 </Box>
-              </Box>
+                </AccordionDetails>
+              </Accordion>
 
-              <Divider sx={{ my: 2 }} />
-
-              {/* Additional Context - Enhanced */}
-              <Box sx={{ 
-                background: '#2A2A2A', 
-                border: '2px solid #4CAF50', 
-                borderRadius: 2, 
-                p: 3,
-                mb: 2
-              }}>
-                <Typography variant="h6" sx={{ color: '#4CAF50', marginBottom: 1 }}>
-                  🎯 Specific Context & Use Cases
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 2 }}>
-                  This is the MOST IMPORTANT field for accurate matching. Be very specific about your situation, needs, and use cases.
-                </Typography>
-                <TextField
-                  label="Detailed Context & Specific Interests"
-                  value={persona.additionalContext || ''}
-                  onChange={(e) => { setPersona({ ...persona, additionalContext: e.target.value }); setIsDirty(true); }}
-                  placeholder="Examples:
+              {/* Additional Context Accordion */}
+              <Accordion 
+                sx={{ 
+                  background: '#1A1A1A', 
+                  border: '1px solid #333',
+                  '&:before': { display: 'none' },
+                  '&.Mui-expanded': { margin: 0 }
+                }}
+              >
+                <AccordionSummary
+                  expandIcon={<ExpandMoreIcon sx={{ color: '#FAFAFA' }} />}
+                  sx={{ 
+                    background: '#2A2A2A',
+                    borderBottom: '1px solid #333',
+                    '&.Mui-expanded': { minHeight: 'auto' }
+                  }}
+                >
+                  <Typography variant="h6" sx={{ color: '#B8B8B8', display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <TargetIcon /> Specific Context & Use Cases
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails sx={{ p: 3 }}>
+                  <Typography variant="body2" sx={{ color: '#B8B8B8', marginBottom: 2 }}>
+                    This is the MOST IMPORTANT field for accurate matching. Be very specific about your situation, needs, and use cases.
+                  </Typography>
+                  <TextField
+                    label="Detailed Context & Specific Interests"
+                    value={persona.additionalContext || ''}
+                    onChange={(e) => { setPersona({ ...persona, additionalContext: e.target.value }); setIsDirty(true); }}
+                    placeholder="Examples:
 • I run a small tech startup and need to understand data privacy regulations for my SaaS product
 • I'm a healthcare provider implementing telehealth and need to know HIPAA compliance requirements
 • I'm a manufacturer concerned about new EPA emissions standards affecting my facility
 • I'm a consumer advocate focused on protecting vulnerable populations from predatory lending
 • I'm a student studying environmental policy and want to track climate change regulations
 • I'm a small business owner in the food industry and need to understand FDA labeling requirements"
-                  fullWidth
-                  multiline
-                  rows={6}
-                  variant="outlined"
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      backgroundColor: '#1A1A1A',
-                    }
-                  }}
-                  helperText="💡 Be specific about your role, industry, location, and exact regulatory concerns. This helps avoid irrelevant matches."
-                />
-              </Box>
+                    fullWidth
+                    multiline
+                    rows={6}
+                    variant="outlined"
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        backgroundColor: '#1A1A1A',
+                      }
+                    }}
+                    helperText="Be specific about your role, industry, location, and exact regulatory concerns. This helps avoid irrelevant matches."
+                  />
+                </AccordionDetails>
+              </Accordion>
 
               {/* Status Messages */}
           {errorText && (
@@ -949,9 +1418,15 @@ export function Persona() {
                 </Alert>
           )}
           
+          {embeddingError && (
+                <Alert severity="warning" sx={{ mt: 2 }}>
+                  Embedding Error: {embeddingError}
+                </Alert>
+          )}
+          
           {lastSaved && (
                 <Alert severity="success" sx={{ mt: 2 }}>
-              ✓ Last saved: {new Date(lastSaved).toLocaleString()}
+                  Last saved: {new Date(lastSaved).toLocaleString()}
                 </Alert>
               )}
 
@@ -963,7 +1438,7 @@ export function Persona() {
                   disabled={saving || !isDirty}
                   sx={{ minWidth: 120 }}
                 >
-              {saving ? 'Saving…' : (isDirty ? 'Save Persona' : 'Saved')}
+              {saving ? (isGeneratingEmbedding ? 'Generating Embedding…' : 'Saving…') : (isDirty ? 'Save & Generate Embedding' : 'Saved')}
                 </Button>
             
             {lastSaved && (
