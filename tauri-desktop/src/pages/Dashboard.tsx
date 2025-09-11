@@ -11,7 +11,8 @@ import {
   Chip,
   CircularProgress,
   Alert,
-  AlertTitle
+  AlertTitle,
+  TextField
 } from '@mui/material';
 import {
   Assessment as AssessmentIcon,
@@ -87,6 +88,12 @@ export function Dashboard() {
   const [showCommentDrafting, setShowCommentDrafting] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<{id: string, title: string} | null>(null);
   
+  // Document analysis state
+  const [documentAnalysis, setDocumentAnalysis] = useState<DocumentAnalysisResult | null>(null);
+  const [isAnalyzingDocument, setIsAnalyzingDocument] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState({ current: 0, total: 0 });
+  const [documentAnalysisError, setDocumentAnalysisError] = useState<string | null>(null);
+  
   // Comments viewing state
   const [showComments, setShowComments] = useState(false);
   const [selectedDocumentForComments, setSelectedDocumentForComments] = useState<{id: string, title: string, docket_id?: string} | null>(null);
@@ -94,7 +101,6 @@ export function Dashboard() {
   const [loadingComments, setLoadingComments] = useState(false);
   const [documentCommentCounts, setDocumentCommentCounts] = useState<{[documentId: string]: number}>({});
   const [isLoadingCommentCounts, setIsLoadingCommentCounts] = useState(false);
-  const [enableCommentCounts, setEnableCommentCounts] = useState(true);
   
   // Comment analysis state
   const [commentAnalysis, setCommentAnalysis] = useState<any>(null);
@@ -178,6 +184,39 @@ export function Dashboard() {
 
   // Utility function to chunk text into smaller pieces based on word count
   const chunkText = (text: string, maxWords: number = 1200): string[] => {
+    // Clean the text first
+    const cleanedText = cleanText(text);
+    
+    // Split text into words
+    const words = cleanedText.split(/\s+/).filter(word => word.length > 0);
+    
+    if (words.length <= maxWords) {
+      return [cleanedText];
+    }
+    
+    const chunks: string[] = [];
+    let currentChunk: string[] = [];
+    
+    for (const word of words) {
+      // If adding this word would exceed the limit, start a new chunk
+      if (currentChunk.length >= maxWords && currentChunk.length > 0) {
+        chunks.push(currentChunk.join(' '));
+        currentChunk = [word];
+      } else {
+        currentChunk.push(word);
+      }
+    }
+    
+    // Add the last chunk if it has content
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk.join(' '));
+    }
+    
+    return chunks;
+  };
+
+  // Utility function to chunk text for document analysis (2k words per chunk)
+  const chunkTextForAnalysis = (text: string, maxWords: number = 2000): string[] => {
     // Clean the text first
     const cleanedText = cleanText(text);
     
@@ -840,6 +879,247 @@ Reasoning: [Your explanation focusing on potential impacts and ripple effects]`;
     };
   };
 
+  // Interface for document analysis results
+  interface DocumentAnalysisResult {
+    analysis: string;
+    chunkSummaries: string[];
+    totalChunks: number;
+  }
+
+  // Function to analyze a single chunk for summary with retry logic
+  const analyzeChunk = async (chunk: string, chunkIndex: number, totalChunks: number, signal?: AbortSignal, maxRetries: number = 3): Promise<string> => {
+    // Get GPT configuration from localStorage
+    const gptHost = localStorage.getItem('gptHost') || '10.0.4.52';
+    const gptPort = localStorage.getItem('gptPort') || '11434';
+    const gptModel = localStorage.getItem('gptModel') || 'gpt-oss:20b';
+    
+    const url = `http://${gptHost}:${gptPort}/api/generate`;
+    
+    const prompt = `You are an AI assistant tasked with summarizing a chunk of a government document.
+
+CHUNK ${chunkIndex + 1} of ${totalChunks}:
+${chunk}
+
+TASK: Provide a concise but comprehensive summary of this chunk. Focus on:
+1. Key regulatory requirements or proposals
+2. Important deadlines or dates
+3. Specific impacts or changes mentioned
+4. Stakeholders or groups affected
+5. Any notable provisions or exceptions
+
+Keep the summary focused and factual. This will be combined with other chunk summaries to create a comprehensive document overview.
+
+RESPONSE FORMAT: Provide only the summary text, no additional formatting or labels.`;
+
+    const payload = {
+      model: gptModel,
+      prompt: prompt,
+      stream: false,
+      reasoning_level: "low",
+      options: {
+        temperature: 0.2,
+        top_p: 0.8
+      }
+    };
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+          signal: signal
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          if (response.status === 500) {
+            console.warn(`Chunk ${chunkIndex + 1} attempt ${attempt} failed with 500 error: ${errorText}`);
+            if (attempt < maxRetries) {
+              // Wait before retrying (exponential backoff)
+              await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+              continue;
+            }
+          }
+          if (response.status === 0 || response.status >= 500) {
+            throw new Error(`Cannot connect to GPT model at ${url}. Please check if the model is running.`);
+          }
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+
+        const result = await response.json();
+        return result.response || 'No summary generated';
+      } catch (error) {
+        console.warn(`Chunk ${chunkIndex + 1} attempt ${attempt} failed:`, error);
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        // Wait before retrying (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      }
+    }
+    
+    throw new Error(`Failed to analyze chunk ${chunkIndex + 1} after ${maxRetries} attempts`);
+  };
+
+  // Function to perform comprehensive document analysis
+  const analyzeDocument = async (document: DocumentData, persona: PersonaData, signal?: AbortSignal): Promise<DocumentAnalysisResult> => {
+    // Get GPT configuration from localStorage
+    const gptHost = localStorage.getItem('gptHost') || '10.0.4.52';
+    const gptPort = localStorage.getItem('gptPort') || '11434';
+    const gptModel = localStorage.getItem('gptModel') || 'gpt-oss:20b';
+    
+    const url = `http://${gptHost}:${gptPort}/api/generate`;
+    
+    // Prepare document text
+    const documentText = `${document.title}\n\n${document.text || ''}`.trim();
+    
+    if (!documentText) {
+      throw new Error('No document content available for analysis');
+    }
+    
+    // Chunk the document
+    const chunks = chunkTextForAnalysis(documentText, 2000);
+    console.log(`Analyzing document with ${chunks.length} chunks`);
+    
+    // Set initial progress
+    setAnalysisProgress({ current: 0, total: chunks.length + 1 }); // +1 for final analysis
+    
+    // Analyze each chunk
+    const chunkSummaries: string[] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      setAnalysisProgress({ current: i + 1, total: chunks.length + 1 });
+      
+      try {
+        const chunkSummary = await analyzeChunk(chunks[i], i, chunks.length, signal);
+        chunkSummaries.push(chunkSummary);
+      } catch (error) {
+        console.error(`Failed to analyze chunk ${i + 1}:`, error);
+        // Add a placeholder summary for failed chunks
+        chunkSummaries.push(`[Chunk ${i + 1} analysis failed - content may be incomplete]`);
+      }
+      
+      // Small delay to avoid overwhelming the service
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
+    // Combine chunk summaries
+    const combinedSummary = chunkSummaries.join('\n\n');
+    
+    // Update progress for final analysis
+    setAnalysisProgress({ current: chunks.length + 1, total: chunks.length + 1 });
+    
+    // Prepare persona text
+    const personaText = preparePersonaForEmbedding(persona);
+    
+    // Perform final analysis
+    const finalPrompt = `You are an AI assistant providing comprehensive analysis of a government document.
+
+PERSONA PROFILE:
+${personaText}
+
+DOCUMENT INFORMATION:
+Title: ${document.title}
+Agency: ${document.agency_id || 'Unknown'}
+Type: ${document.document_type || 'Unknown'}
+
+COMPREHENSIVE DOCUMENT SUMMARY (from chunk analysis):
+${combinedSummary}
+
+TASK: Based on the comprehensive summary above, provide a detailed analysis that includes:
+
+1. Executive Summary: A clear, concise overview of what this document is about and its main provisions
+2. Relevancy Analysis: How this document relates to the persona's interests, role, industry, and location. Consider direct and indirect impacts
+3. Chain of Thought Reasoning: Your step-by-step reasoning process for determining relevancy, including what factors you considered and why
+4. Actionable Steps: Specific, concrete actions the persona should consider taking based on this document. Include:
+   - Immediate actions (if any deadlines or time-sensitive items)
+   - Research or follow-up actions needed
+   - Stakeholders to contact or engage with
+   - Resources to review or documents to read
+   - Opportunities for public comment or participation
+   - Professional or personal considerations
+
+WRITING STYLE INSTRUCTIONS:
+- Use simple, clear language that is easy to understand
+- Avoid jargon, legal terminology, or overly complex sentences
+- Write in a conversational, accessible tone
+- Break down complex concepts into simple explanations
+- Use everyday language that anyone can understand
+- Keep sentences short and to the point
+
+IMPORTANT FORMATTING INSTRUCTIONS:
+- Use plain text format only
+- Do NOT use ASCII tables, boxes, or complex formatting
+- Use simple bullet points, numbered lists, or paragraph breaks for structure
+- Keep formatting clean and readable in a plain text environment
+- Avoid special characters that may not display properly
+
+Provide your analysis in a clear, well-structured format that covers all these aspects.`;
+
+    const payload = {
+      model: gptModel,
+      prompt: finalPrompt,
+      stream: false,
+      reasoning_level: "high",
+      options: {
+        temperature: 0.3,
+        top_p: 0.8
+      }
+    };
+
+    // Retry logic for final analysis
+    const maxRetries = 3;
+    let responseText = 'No analysis provided';
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+          signal: signal
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          if (response.status === 500) {
+            console.warn(`Final analysis attempt ${attempt} failed with 500 error: ${errorText}`);
+            if (attempt < maxRetries) {
+              // Wait before retrying (exponential backoff)
+              await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+              continue;
+            }
+          }
+          if (response.status === 0 || response.status >= 500) {
+            throw new Error(`Cannot connect to GPT model at ${url}. Please check if the model is running.`);
+          }
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+
+        const result = await response.json();
+        responseText = result.response || 'No analysis provided';
+        break; // Success, exit retry loop
+      } catch (error) {
+        console.warn(`Final analysis attempt ${attempt} failed:`, error);
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        // Wait before retrying (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+      }
+    }
+
+    return {
+      analysis: responseText,
+      chunkSummaries,
+      totalChunks: chunks.length
+    };
+  };
+
 
 
 
@@ -847,11 +1127,6 @@ Reasoning: [Your explanation focusing on potential impacts and ripple effects]`;
   // Function to fetch comment counts for all matched documents (optimized for performance)
   const fetchCommentCounts = async (documents: any[]) => {
     try {
-      // Check if comment counts are enabled
-      if (!enableCommentCounts) {
-        console.log('Comment counts disabled, skipping fetch');
-        return;
-      }
       
       const savedConfig = localStorage.getItem('navi-regulations-api-config');
       if (!savedConfig) {
@@ -1132,14 +1407,43 @@ Focus on providing actionable insights and clear categorization of the comments.
   };
 
   // Comment drafting functions
-  const handleStartComment = (documentId: string, documentTitle: string) => {
+  const handleStartComment = async (documentId: string, documentTitle: string) => {
     setSelectedDocument({ id: documentId, title: documentTitle });
     setShowCommentDrafting(true);
+    setDocumentAnalysis(null);
+    setDocumentAnalysisError(null);
+    
+    // Find the document data
+    const document = documents.find(doc => doc.document_id === documentId);
+    if (!document || !persona) {
+      setDocumentAnalysisError('Document or persona not found');
+      return;
+    }
+    
+    // Start document analysis
+    setIsAnalyzingDocument(true);
+    setAnalysisProgress({ current: 0, total: 0 });
+    
+    try {
+      const analysis = await analyzeDocument(document, persona);
+      setDocumentAnalysis(analysis);
+    } catch (error) {
+      console.error('Error analyzing document:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error during analysis';
+      setDocumentAnalysisError(errorMessage);
+    } finally {
+      setIsAnalyzingDocument(false);
+      setAnalysisProgress({ current: 0, total: 0 });
+    }
   };
 
   const handleCloseCommentDrafting = () => {
     setShowCommentDrafting(false);
     setSelectedDocument(null);
+    setDocumentAnalysis(null);
+    setDocumentAnalysisError(null);
+    setIsAnalyzingDocument(false);
+    setAnalysisProgress({ current: 0, total: 0 });
   };
 
 
@@ -1242,23 +1546,36 @@ Focus on providing actionable insights and clear categorization of the comments.
 
           {/* Top K Input */}
           <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <label style={{ fontSize: '14px', color: '#B8B8B8', fontWeight: 500 }}>
-              Top K Documents:
-            </label>
-            <input
+            <TextField
+              label="Top K Documents"
               type="number"
               value={topK}
               onChange={(e) => setTopK(Math.max(1, Math.min(100, parseInt(e.target.value) || 20)))}
-              min="1"
-              max="100"
-              style={{
-                background: '#2A2A2A',
-                border: '1px solid #444',
-                borderRadius: 4,
-                padding: '6px 8px',
-                color: '#FAFAFA',
-                fontSize: '14px',
-                width: '80px'
+              inputProps={{ min: 1, max: 100 }}
+              size="small"
+              sx={{
+                width: '120px',
+                '& .MuiOutlinedInput-root': {
+                  backgroundColor: '#2A2A2A',
+                  '& fieldset': {
+                    borderColor: '#444',
+                  },
+                  '&:hover fieldset': {
+                    borderColor: '#666',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: '#4CAF50',
+                  },
+                },
+                '& .MuiInputLabel-root': {
+                  color: '#B8B8B8',
+                  '&.Mui-focused': {
+                    color: '#4CAF50',
+                  },
+                },
+                '& .MuiOutlinedInput-input': {
+                  color: '#FAFAFA',
+                },
               }}
             />
           </div>
@@ -1288,24 +1605,6 @@ Focus on providing actionable insights and clear categorization of the comments.
               {isEmbeddingDocuments ? `Embedding... (${documentEmbeddingProgress.current}/${documentEmbeddingProgress.total})` : `Find Matches (${documents.length})`}
               </button>
               
-              {/* Comment Count Toggle */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input
-                  type="checkbox"
-                  id="enableCommentCounts"
-                  checked={enableCommentCounts}
-                  onChange={(e) => setEnableCommentCounts(e.target.checked)}
-                  style={{ margin: 0 }}
-                />
-                <label htmlFor="enableCommentCounts" style={{ 
-                  fontSize: '12px', 
-                  color: '#B8B8B8', 
-                  cursor: 'pointer',
-                  userSelect: 'none'
-                }}>
-                  Show comment counts
-                </label>
-              </div>
             
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <button
@@ -1476,7 +1775,7 @@ Focus on providing actionable insights and clear categorization of the comments.
                           cursor: 'pointer'
                         }}
                       >
-                        See More
+                        Analyze Document
                       </button>
                       <button
                         onClick={() => handleViewComments(match.document.document_id, match.document.title, match.document.docket_id)}
@@ -1568,7 +1867,7 @@ Focus on providing actionable insights and clear categorization of the comments.
         )}
       </div>
       
-      {/* Comment Drafting Modal */}
+      {/* Document Analysis Modal */}
       {showCommentDrafting && selectedDocument && (
         <div style={{
           position: 'fixed',
@@ -1580,55 +1879,125 @@ Focus on providing actionable insights and clear categorization of the comments.
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 1000
+          zIndex: 1000,
+          padding: 20
         }}>
           <div style={{
             background: '#1A1A1A',
             border: '1px solid #333',
             borderRadius: 12,
-            padding: 24,
-            minWidth: 400,
-            maxWidth: 600,
-            maxHeight: '80vh',
-            overflow: 'auto',
-            position: 'relative'
+            width: '100%',
+            maxWidth: '1000px',
+            maxHeight: '90vh',
+            overflow: 'hidden',
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column'
           }}>
-            {/* Close Button */}
-            <button
-              onClick={handleCloseCommentDrafting}
-              style={{
-                position: 'absolute',
-                top: 16,
-                right: 16,
-                background: 'transparent',
-                border: 'none',
-                color: '#B8B8B8',
-                fontSize: '20px',
-                cursor: 'pointer',
-                padding: 4,
-                borderRadius: 4
-              }}
-            >
-              ×
-            </button>
-            
-            {/* Blank Content */}
-            <div style={{ paddingTop: 20 }}>
-              <h3 style={{ 
-                margin: '0 0 16px 0', 
-                fontSize: '18px', 
-                fontWeight: 600,
-                color: '#FAFAFA'
-              }}>
-                {selectedDocument.title}
-              </h3>
-              <p style={{ 
-                color: '#B8B8B8', 
-                fontSize: '14px',
-                margin: 0
-              }}>
-                Document ID: {selectedDocument.id}
-              </p>
+            {/* Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid #333',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexShrink: 0
+            }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 600 }}>
+                  Document Analysis
+                </h2>
+                <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: '#B8B8B8' }}>
+                  {selectedDocument.title}
+                </p>
+              </div>
+              <button
+                onClick={handleCloseCommentDrafting}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#B8B8B8',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  padding: '4px'
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Content */}
+            <div style={{ 
+              flex: 1, 
+              overflowY: 'auto', 
+              padding: 24 
+            }}>
+              {isAnalyzingDocument ? (
+                <div style={{ textAlign: 'center', color: '#B8B8B8', fontSize: '14px' }}>
+                  <CircularProgress size={32} style={{ marginBottom: 16, color: '#4CAF50' }} />
+                  <div style={{ marginBottom: 16 }}>Analyzing document with AI...</div>
+                  <div style={{ fontSize: '12px', color: '#666' }}>
+                    This may take a moment while we process the document in chunks
+                  </div>
+                  {analysisProgress.total > 0 && (
+                    <div style={{ marginTop: 12, fontSize: '12px', color: '#4CAF50' }}>
+                      Processing chunk {analysisProgress.current} of {analysisProgress.total}
+                    </div>
+                  )}
+                </div>
+              ) : documentAnalysisError ? (
+                <Alert severity="error" style={{ marginBottom: 16 }}>
+                  <AlertTitle>Analysis Error</AlertTitle>
+                  {documentAnalysisError}
+                </Alert>
+              ) : documentAnalysis ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                  {/* Document Analysis */}
+                  <Card style={{ background: '#2A2A2A', border: '1px solid #444' }}>
+                    <CardContent>
+                      <Typography variant="h6" style={{ marginBottom: 16, color: '#4CAF50', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <AssessmentIcon fontSize="small" />
+                        Document Analysis
+                      </Typography>
+                      <Typography variant="body1" style={{ 
+                        color: '#FAFAFA', 
+                        lineHeight: '1.6',
+                        whiteSpace: 'pre-wrap',
+                        fontSize: '14px',
+                        maxHeight: '500px',
+                        overflowY: 'auto',
+                        padding: '16px',
+                        background: '#1A1A1A',
+                        borderRadius: '8px',
+                        border: '1px solid #333'
+                      }}>
+                        {documentAnalysis.analysis}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+
+                  {/* Analysis Metadata */}
+                  <Card style={{ background: '#333', border: '1px solid #555' }}>
+                    <CardContent style={{ padding: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="caption" style={{ color: '#B8B8B8' }}>
+                          <strong>Document Chunks Analyzed:</strong> {documentAnalysis.totalChunks}
+                        </Typography>
+                        <Typography variant="caption" style={{ color: '#B8B8B8' }}>
+                          <strong>Analysis Method:</strong> Chunked Processing
+                        </Typography>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', color: '#B8B8B8', fontSize: '14px' }}>
+                  <div style={{ marginBottom: 16 }}>Document analysis will appear here once processing is complete.</div>
+                  <div style={{ fontSize: '12px', color: '#666' }}>
+                    The document is being analyzed in chunks for comprehensive understanding.
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
