@@ -44,7 +44,6 @@ Before running the application, ensure you have the following installed:
 - `tauri-desktop/` - Main desktop application (React + Tauri)
 - `lambda_function.py` - AWS Lambda function for API endpoints
 - `workflows/` - N8N workflow configurations
-- `requirements.txt` - Python dependencies for Lambda function
 
 ## Features
 

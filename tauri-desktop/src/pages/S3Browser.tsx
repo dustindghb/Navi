@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+import { useState, useEffect } from 'react';
 
 interface S3File {
   key: string;

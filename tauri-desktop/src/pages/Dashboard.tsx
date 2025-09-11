@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+import { CommentDrafting } from '../components/CommentDrafting';
 
 interface PersonaData {
   name?: string;
@@ -65,6 +66,10 @@ export function Dashboard() {
   const [lastAnalysis, setLastAnalysis] = useState<string | null>(null);
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
+  
+  // Comment drafting state
+  const [showCommentDrafting, setShowCommentDrafting] = useState(false);
+  const [selectedDocument, setSelectedDocument] = useState<{id: string, title: string} | null>(null);
 
   // Load persona and API data on component mount
   useEffect(() => {
@@ -648,6 +653,24 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
 
   // generateRelevanceReasoning function removed - not needed with embedding-only approach
 
+  // Comment drafting functions
+  const handleStartComment = (documentId: string, documentTitle: string) => {
+    setSelectedDocument({ id: documentId, title: documentTitle });
+    setShowCommentDrafting(true);
+    addLog(`Starting comment draft for document: ${documentTitle}`);
+  };
+
+  const handleCloseCommentDrafting = () => {
+    setShowCommentDrafting(false);
+    setSelectedDocument(null);
+    addLog('Comment drafting closed');
+  };
+
+  const handleCommentSubmitted = (commentId: string) => {
+    addLog(`Comment submitted successfully: ${commentId}`);
+    // Could refresh data or show success message here
+  };
+
   return (
     <div style={{ 
       height: '100vh', 
@@ -984,6 +1007,21 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
 
                       {/* Links directly in the card */}
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button
+                          onClick={() => handleStartComment(documentId, embeddingDoc?.title || `Document ${documentId}`)}
+                          style={{
+                            background: '#4CAF50',
+                            color: '#FAFAFA',
+                            border: 'none',
+                            padding: '8px 16px',
+                            borderRadius: 6,
+                            fontSize: '14px',
+                            fontWeight: 500,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Draft Comment
+                        </button>
                         {embeddingDoc?.webCommentLink && (
                           <a 
                             href={embeddingDoc.webCommentLink} 
@@ -999,7 +1037,7 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
                               fontWeight: 500
                             }}
                           >
-                            Comment
+                            External Comment
                           </a>
                         )}
                         {embeddingDoc?.webDocumentLink && (
@@ -1202,6 +1240,21 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
                       </div>
                       
                       <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          onClick={() => handleStartComment(board.documentId, board.title)}
+                          style={{
+                            background: '#4CAF50',
+                            color: '#FAFAFA',
+                            border: 'none',
+                            padding: '8px 16px',
+                            borderRadius: 6,
+                            fontSize: '14px',
+                            fontWeight: 500,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Draft Comment
+                        </button>
                         {board.webCommentLink && (
                           <a 
                             href={board.webCommentLink} 
@@ -1217,7 +1270,7 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
                               fontWeight: 500
                             }}
                           >
-                            Comment
+                            External Comment
                           </a>
                         )}
                         {board.webDocumentLink && (
@@ -1321,6 +1374,17 @@ Only include documents with relevance score >= 6. Be selective and focus on the 
           </div>
         )}
       </div>
+      
+      {/* Comment Drafting Modal */}
+      {showCommentDrafting && selectedDocument && persona && (
+        <CommentDrafting
+          documentId={selectedDocument.id}
+          documentTitle={selectedDocument.title}
+          personaId={persona.name || 'default'} // This should be the actual persona ID from the database
+          onClose={handleCloseCommentDrafting}
+          onCommentSubmitted={handleCommentSubmitted}
+        />
+      )}
     </div>
   );
 }

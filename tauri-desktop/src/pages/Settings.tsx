@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Box, 
   Typography, 
@@ -6,31 +6,31 @@ import {
   TextField, 
   Button, 
   Alert, 
-  Grid, 
   Chip,
   IconButton,
   Collapse,
-  MenuItem,
+  // MenuItem,
   Divider,
   Switch,
   FormControlLabel
 } from '@mui/material';
+// import { Grid } from '@mui/material';
 import { 
   Close as CloseIcon,
-  Save as SaveIcon,
+  // Save as SaveIcon,
   Delete as DeleteIcon,
   CloudDownload as DownloadIcon,
-  Settings as SettingsIcon,
+  // Settings as SettingsIcon,
   Computer as ComputerIcon,
   Cloud as CloudIcon
 } from '@mui/icons-material';
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+// import { fetch as tauriFetch } from '@tauri-apps/plugin-http'; // Not using Tauri HTTP due to issues
 
 // Type definitions for local Ollama configuration
-interface OllamaDefaults {
-  host?: string;
-  port?: string | number;
-}
+// interface OllamaDefaults {
+//   host?: string;
+//   port?: string | number;
+// }
 
 interface DetectResult {
   host?: string;
@@ -70,6 +70,8 @@ export function Settings() {
   const [ollamaTagsTest, setOllamaTagsTest] = useState<string | null>(null);
   const [isTestingOllamaTags, setIsTestingOllamaTags] = useState(false);
   const [isClearingData, setIsClearingData] = useState(false);
+  const [isUploadingToDatabase, setIsUploadingToDatabase] = useState(false);
+  const [uploadResult, setUploadResult] = useState<any>(null);
   const [paginationConfig, setPaginationConfig] = useState({
     limit: 50,
     offset: 0,
@@ -202,30 +204,16 @@ export function Settings() {
     try {
       console.log('Attempting to connect to Ollama...');
       
-      let response;
-      try {
-        // Try Tauri HTTP client first
-        console.log('Trying Tauri HTTP client...');
-        response = await tauriFetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        });
-        console.log('Tauri HTTP client succeeded');
-      } catch (tauriError) {
-        console.log('Tauri HTTP client failed, trying browser fetch...', tauriError);
-        // Fallback to browser fetch
-        response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        });
-        console.log('Browser fetch succeeded');
-      }
+      // Use browser fetch only
+      console.log('Using browser fetch for Ollama connection...');
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+      console.log('Browser fetch completed for Ollama connection');
 
       console.log('Response received:', {
         status: response.status,
@@ -306,27 +294,16 @@ export function Settings() {
       console.log('Getting total document count...');
       const countUrl = `${baseUrl}?limit=1&offset=0`;
       
-      let countResponse;
-      try {
-        countResponse = await tauriFetch(countUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          }
-        });
-        console.log('Count fetch via Tauri succeeded');
-      } catch (tauriError) {
-        console.log('Tauri failed for count, trying browser fetch...', tauriError);
-        countResponse = await fetch(countUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          }
-        });
-        console.log('Count fetch via browser succeeded');
-      }
+      // Use browser fetch only
+      console.log('Using browser fetch for count...');
+      const countResponse = await fetch(countUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        }
+      });
+      console.log('Count fetch via browser completed');
 
       if (!countResponse.ok) {
         const errorText = await countResponse.text();
@@ -362,27 +339,16 @@ export function Settings() {
 
         const batchUrl = `${baseUrl}?limit=${limit}&offset=${offset}`;
         
-        let batchResponse;
-        try {
-          batchResponse = await tauriFetch(batchUrl, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            }
-          });
-          console.log(`Batch ${batchCount} fetch via Tauri succeeded`);
-        } catch (tauriError) {
-          console.log(`Tauri failed for batch ${batchCount}, trying browser fetch...`, tauriError);
-          batchResponse = await fetch(batchUrl, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            }
-          });
-          console.log(`Batch ${batchCount} fetch via browser succeeded`);
-        }
+        // Use browser fetch only
+        console.log(`Using browser fetch for batch ${batchCount}...`);
+        const batchResponse = await fetch(batchUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          }
+        });
+        console.log(`Batch ${batchCount} fetch via browser completed`);
 
         if (!batchResponse.ok) {
           const errorText = await batchResponse.text();
@@ -507,39 +473,39 @@ export function Settings() {
     }
   };
 
-  const saveDataLocally = () => {
-    if (!apiData) {
-      setApiError('No data to save');
-      return;
-    }
+  // const saveDataLocally = () => {
+  //   if (!apiData) {
+  //     setApiError('No data to save');
+  //     return;
+  //   }
 
-    try {
-      const timestamp = new Date().toISOString();
-      const dataToSave = {
-        ...apiData,
-        _saved_at: timestamp
-      };
+  //   try {
+  //     const timestamp = new Date().toISOString();
+  //     const dataToSave = {
+  //       ...apiData,
+  //       _saved_at: timestamp
+  //     };
 
-      localStorage.setItem('navi-regulations-data', JSON.stringify(dataToSave));
-      localStorage.setItem('navi-last-fetch', timestamp);
+  //     localStorage.setItem('navi-regulations-data', JSON.stringify(dataToSave));
+  //     localStorage.setItem('navi-last-fetch', timestamp);
       
-      setSavedData(dataToSave);
-      setLastFetchTime(timestamp);
+  //     setSavedData(dataToSave);
+  //     setLastFetchTime(timestamp);
       
-      console.log('Data saved locally:', dataToSave);
+  //     console.log('Data saved locally:', dataToSave);
       
-      // Dispatch custom event to notify other components
-      window.dispatchEvent(new CustomEvent('storageChange', {
-        detail: { key: 'navi-regulations-data', value: dataToSave }
-      }));
+  //     // Dispatch custom event to notify other components
+  //     window.dispatchEvent(new CustomEvent('storageChange', {
+  //       detail: { key: 'navi-regulations-data', value: dataToSave }
+  //     }));
       
-      // Clear any existing errors
-      setApiError(null);
-    } catch (err) {
-      console.error('Error saving data:', err);
-      setApiError('Failed to save data locally');
-    }
-  };
+  //     // Clear any existing errors
+  //     setApiError(null);
+  //   } catch (err) {
+  //     console.error('Error saving data:', err);
+  //     setApiError('Failed to save data locally');
+  //   }
+  // };
 
   const clearSavedData = async () => {
     setIsClearingData(true);
@@ -567,6 +533,152 @@ export function Settings() {
     }
   };
 
+  const uploadToDatabase = async () => {
+    if (!savedData || !savedData.documents) {
+      setApiError('No saved data to upload to database');
+      return;
+    }
+
+    setIsUploadingToDatabase(true);
+    setUploadResult(null);
+    setApiError(null);
+
+    try {
+      console.log('=== UPLOADING SAVED DATA TO DATABASE ===');
+      console.log('Saved data structure:', {
+        hasDocuments: !!savedData.documents,
+        documentsLength: savedData.documents?.length || 0,
+        hasPagination: !!savedData.pagination,
+        hasSavedAt: !!savedData._saved_at,
+        firstDocumentKeys: savedData.documents?.[0] ? Object.keys(savedData.documents[0]) : 'No documents'
+      });
+      console.log('Documents to upload:', savedData.documents.length);
+
+      // Make direct HTTP call to the upload endpoint using browser fetch only
+      console.log('Using browser fetch for database upload...');
+      const response = await fetch('http://localhost:8001/api/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(savedData)
+      });
+      console.log('Browser fetch completed for database upload');
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('HTTP error response:', errorText);
+        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('Database upload result:', result);
+      setUploadResult(result);
+
+    } catch (err) {
+      console.error('Error uploading to database:', err);
+      console.error('Error details:', {
+        name: err?.name,
+        message: err?.message,
+        stack: err?.stack
+      });
+      setApiError(`Failed to upload to database: ${err?.message || err}`);
+    } finally {
+      setIsUploadingToDatabase(false);
+    }
+  };
+
+  const testDatabaseConnectivity = async () => {
+    try {
+      console.log('=== TESTING DATABASE CONNECTIVITY ===');
+      
+      // Test health endpoint using browser fetch only
+      console.log('Testing database health endpoint...');
+      const response = await fetch('http://localhost:8001/health', {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        }
+      });
+      console.log('Database health check via browser completed');
+
+      if (response.ok) {
+        const healthData = await response.json();
+        console.log('Database health check result:', healthData);
+        setApiError(null);
+        alert('Database connection successful! Health check passed.');
+      } else {
+        throw new Error(`Health check failed: HTTP ${response.status}`);
+      }
+    } catch (err) {
+      console.error('Database connectivity test failed:', err);
+      setApiError(`Database connection failed: ${err?.message || err}`);
+      alert(`Database connection failed: ${err?.message || err}`);
+    }
+  };
+
+  const testUploadWithSampleData = async () => {
+    setIsUploadingToDatabase(true);
+    setUploadResult(null);
+    setApiError(null);
+
+    try {
+      console.log('=== TESTING UPLOAD WITH SAMPLE DATA ===');
+      
+      const sampleData = {
+        documents: [
+          {
+            documentId: "TEST-SAMPLE-001",
+            title: "Sample Test Document",
+            content: "This is a sample document for testing upload functionality",
+            agencyId: "TEST",
+            documentType: "Test",
+            webDocumentLink: "https://test.com/doc",
+            webDocketLink: "https://test.com/docket",
+            webCommentLink: "https://test.com/comment",
+            embedding: [0.1, 0.2, 0.3, 0.4, 0.5]
+          }
+        ]
+      };
+
+      console.log('Sample data structure:', sampleData);
+
+      // Make direct HTTP call to the upload endpoint using browser fetch only
+      console.log('Using browser fetch for sample upload...');
+      const response = await fetch('http://localhost:8001/api/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(sampleData)
+      });
+      console.log('Browser fetch completed for sample upload');
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('HTTP error response:', errorText);
+        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('Sample upload result:', result);
+      setUploadResult(result);
+      alert('Sample upload successful! Check the result below.');
+
+    } catch (err) {
+      console.error('Error in sample upload:', err);
+      console.error('Error details:', {
+        name: err?.name,
+        message: err?.message,
+        stack: err?.stack
+      });
+      setApiError(`Sample upload failed: ${err?.message || err}`);
+      alert(`Sample upload failed: ${err?.message || err}`);
+    } finally {
+      setIsUploadingToDatabase(false);
+    }
+  };
+
   const testConnectivity = async () => {
     setIsTestingConnectivity(true);
     setConnectivityTest(null);
@@ -582,7 +694,7 @@ export function Settings() {
     for (const url of testUrls) {
       try {
         console.log(`Testing connectivity to: ${url}`);
-        const response = await tauriFetch(url, {
+        const response = await fetch(url, {
           method: 'GET',
           headers: {
             'Accept': 'application/json',
@@ -612,47 +724,47 @@ export function Settings() {
     console.log('=== CONNECTIVITY TEST END ===');
   };
 
-  const testApiVsS3 = async () => {
-    console.log('=== TESTING NEW API ENDPOINT ===');
+  // const testApiVsS3 = async () => {
+  //   console.log('=== TESTING NEW API ENDPOINT ===');
     
-    // Test the new API endpoint
-    try {
-      const apiResponse = await tauriFetch('https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/?limit=5&offset=0', {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        }
-      });
+  //   // Test the new API endpoint
+  //   try {
+  //     const apiResponse = await tauriFetch('https://pktr0h24g5.execute-api.us-west-1.amazonaws.com/prod/?limit=5&offset=0', {
+  //       method: 'GET',
+  //       headers: {
+  //         'Accept': 'application/json',
+  //       }
+  //     });
       
-      if (apiResponse.ok) {
-        const apiData = await apiResponse.json();
-        console.log('New API Response structure:', {
-          success: apiData.success,
-          hasData: !!apiData.data,
-          hasDocuments: !!apiData.data?.documents,
-          documentCount: apiData.data?.documents?.length || 0,
-          pagination: apiData.data?.pagination,
-          firstDocumentKeys: apiData.data?.documents?.[0] ? Object.keys(apiData.data.documents[0]) : 'No documents',
-          hasWebLinks: apiData.data?.documents?.[0] ? {
-            webCommentLink: !!apiData.data.documents[0].webCommentLink,
-            webDocumentLink: !!apiData.data.documents[0].webDocumentLink,
-            webDocketLink: !!apiData.data.documents[0].webDocketLink
-          } : 'No documents'
-        });
+  //     if (apiResponse.ok) {
+  //       const apiData = await apiResponse.json();
+  //       console.log('New API Response structure:', {
+  //         success: apiData.success,
+  //         hasData: !!apiData.data,
+  //         hasDocuments: !!apiData.data?.documents,
+  //         documentCount: apiData.data?.documents?.length || 0,
+  //         pagination: apiData.data?.pagination,
+  //         firstDocumentKeys: apiData.data?.documents?.[0] ? Object.keys(apiData.data.documents[0]) : 'No documents',
+  //         hasWebLinks: apiData.data?.documents?.[0] ? {
+  //           webCommentLink: !!apiData.data.documents[0].webCommentLink,
+  //           webDocumentLink: !!apiData.data.documents[0].webDocumentLink,
+  //           webDocketLink: !!apiData.data.documents[0].webDocketLink
+  //         } : 'No documents'
+  //       });
         
-        // Show a sample of what the API returns
-        if (apiData.data?.documents?.[0]) {
-          console.log('Sample API document:', JSON.stringify(apiData.data.documents[0], null, 2));
-        }
-      } else {
-        console.error('API test failed:', apiResponse.status, apiResponse.statusText);
-      }
-    } catch (err) {
-      console.error('Error testing new API:', err);
-    }
+  //       // Show a sample of what the API returns
+  //       if (apiData.data?.documents?.[0]) {
+  //         console.log('Sample API document:', JSON.stringify(apiData.data.documents[0], null, 2));
+  //       }
+  //     } else {
+  //       console.error('API test failed:', apiResponse.status, apiResponse.statusText);
+  //     }
+  //   } catch (err) {
+  //     console.error('Error testing new API:', err);
+  //   }
     
-    console.log('=== END NEW API TEST ===');
-  };
+  //   console.log('=== END NEW API TEST ===');
+  // };
 
   const testOllamaTags = async () => {
     setIsTestingOllamaTags(true);
@@ -664,7 +776,7 @@ export function Settings() {
     console.log('Testing Ollama tags endpoint:', url);
 
     try {
-      const response = await tauriFetch(url, {
+      const response = await fetch(url, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
@@ -763,30 +875,16 @@ export function Settings() {
     try {
       console.log('Attempting to connect to local Ollama...');
       
-      let response;
-      try {
-        // Try Tauri HTTP client first
-        console.log('Trying Tauri HTTP client...');
-        response = await tauriFetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        });
-        console.log('Tauri HTTP client succeeded');
-      } catch (tauriError) {
-        console.log('Tauri HTTP client failed, trying browser fetch...', tauriError);
-        // Fallback to browser fetch
-        response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        });
-        console.log('Browser fetch succeeded');
-      }
+      // Use browser fetch only
+      console.log('Using browser fetch for local Ollama connection...');
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+      console.log('Browser fetch completed for local Ollama connection');
 
       console.log('Response received:', {
         status: response.status,
@@ -985,7 +1083,7 @@ export function Settings() {
 
   const Details = (props: { title: string; data: any; defaultOpen?: boolean }) => {
     if (!props.data) return null;
-    const [open, setOpen] = React.useState<boolean>(!!props.defaultOpen);
+    const [open, setOpen] = useState<boolean>(!!props.defaultOpen);
     const content = typeof props.data === 'string' ? props.data : JSON.stringify(props.data, null, 2);
     return (
       <Box sx={{ mt: 2 }}>
@@ -1096,8 +1194,8 @@ export function Settings() {
             </Typography>
           </Box>
           
-          <Grid container spacing={2} sx={{ mb: 2 }}>
-            <Grid item xs={12} sm={4}>
+          <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+            <Box sx={{ flex: 1, minWidth: 200 }}>
               <TextField
                 fullWidth
                 label="Model"
@@ -1106,8 +1204,8 @@ export function Settings() {
                 placeholder="e.g., gpt-oss:20b"
                 variant="outlined"
               />
-            </Grid>
-            <Grid item xs={12} sm={4}>
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 200 }}>
               <TextField
                 fullWidth
                 label="Host"
@@ -1116,8 +1214,8 @@ export function Settings() {
                 placeholder="e.g., 10.0.4.52"
                 variant="outlined"
               />
-            </Grid>
-            <Grid item xs={12} sm={4}>
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 200 }}>
               <TextField
                 fullWidth
                 label="Port"
@@ -1126,8 +1224,8 @@ export function Settings() {
                 placeholder="e.g., 11434"
                 variant="outlined"
               />
-            </Grid>
-          </Grid>
+            </Box>
+          </Box>
 
           <TextField
             fullWidth
@@ -1211,8 +1309,8 @@ export function Settings() {
             </Alert>
           )}
 
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={4}>
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            <Box sx={{ flex: 1, minWidth: 200 }}>
               <TextField 
                 fullWidth 
                 label="Model Name" 
@@ -1220,8 +1318,8 @@ export function Settings() {
                 onChange={(e) => setLocalModel(e.target.value)}
                 variant="outlined"
               />
-            </Grid>
-            <Grid item xs={12} sm={4}>
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 200 }}>
               <TextField 
                 fullWidth 
                 label="Host" 
@@ -1230,8 +1328,8 @@ export function Settings() {
                 placeholder="e.g., 127.0.0.1"
                 variant="outlined"
               />
-            </Grid>
-            <Grid item xs={12} sm={4}>
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 200 }}>
               <TextField 
                 fullWidth 
                 label="Port" 
@@ -1240,8 +1338,8 @@ export function Settings() {
                 placeholder="11435"
                 variant="outlined"
               />
-            </Grid>
-          </Grid>
+            </Box>
+          </Box>
 
           <TextField
             fullWidth
@@ -1398,6 +1496,35 @@ export function Settings() {
                 {isClearingData ? 'Clearing & Refreshing...' : 'Clear Saved Data'}
               </Button>
             )}
+
+            {savedData && (
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<DownloadIcon />}
+                onClick={uploadToDatabase}
+                disabled={isUploadingToDatabase}
+              >
+                {isUploadingToDatabase ? 'Uploading...' : 'Upload to Database'}
+              </Button>
+            )}
+
+            <Button
+              variant="outlined"
+              onClick={testDatabaseConnectivity}
+              disabled={isUploadingToDatabase}
+            >
+              Test Database Connection
+            </Button>
+
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={testUploadWithSampleData}
+              disabled={isUploadingToDatabase}
+            >
+              Test Upload (Sample Data)
+            </Button>
           </Box>
 
           {connectivityTest && (
@@ -1415,6 +1542,29 @@ export function Settings() {
             <Alert severity="info" sx={{ mb: 2 }}>
               <Typography variant="body2">
                 🔄 Clearing saved data and fetching fresh API data...
+              </Typography>
+            </Alert>
+          )}
+
+          {isUploadingToDatabase && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Typography variant="body2">
+                🚀 Uploading {savedData?.documents?.length || 0} documents with embeddings to database...
+              </Typography>
+            </Alert>
+          )}
+
+          {uploadResult && (
+            <Alert severity="success" sx={{ mb: 2 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                Database Upload Complete
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Inserted: {uploadResult.inserted} • Updated: {uploadResult.updated} • 
+                Total Processed: {uploadResult.total_processed}
+                {uploadResult.errors && uploadResult.errors.length > 0 && 
+                  ` • Errors: ${uploadResult.errors.length}`
+                }
               </Typography>
             </Alert>
           )}
